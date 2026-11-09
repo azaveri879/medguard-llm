@@ -29,6 +29,8 @@ LABEL_TYPES = {
     "OTHERPHI": "OTHER",
 }
 
+MIN_SCORE = 0.01
+
 _loaded = None
 
 
@@ -45,8 +47,8 @@ def _load_model():
     return _loaded
 
 
-def _token_entities(text: str):
-    """Return (start, end, PHI type) for each token the model marks as PHI."""
+def _token_scores(text: str):
+    """Return (start, end, PHI type, PHI probability, is top label) for candidate tokens."""
     tokenizer, model = _load_model()
 
     import torch
@@ -58,14 +60,38 @@ def _token_entities(text: str):
     offsets = encoded.pop("offset_mapping").tolist()
     encoded.pop("overflow_to_sample_mapping")
     with torch.no_grad():
-        predictions = model(**encoded).logits.argmax(dim=-1).tolist()
+        probabilities = model(**encoded).logits.softmax(dim=-1)
 
+    label_types = [
+        LABEL_TYPES.get(model.config.id2label[index].split("-")[-1])
+        for index in range(probabilities.shape[-1])
+    ]
+    phi_mask = torch.tensor([phi_type is not None for phi_type in label_types])
+    phi_scores = probabilities[..., phi_mask].sum(dim=-1).tolist()
+    phi_probabilities = probabilities.masked_fill(~phi_mask, 0)
+    best_phi = phi_probabilities.argmax(dim=-1).tolist()
+    top_labels = probabilities.argmax(dim=-1).tolist()
+
+    tokens = []
+    for w, window in enumerate(offsets):
+        for t, (start, end) in enumerate(window):
+            if end > start and phi_scores[w][t] >= MIN_SCORE:
+                is_top = label_types[top_labels[w][t]] is not None
+                tokens.append((start, end, label_types[best_phi[w][t]], phi_scores[w][t], is_top))
+    return tokens
+
+
+def _token_entities(text: str):
+    """Return (start, end, PHI type) for tokens that pass the decision rule.
+
+    By default a token is PHI when a PHI label is the model's top choice. Setting
+    PHI_NER_THRESHOLD marks it PHI when total PHI probability reaches that value.
+    """
+    threshold = os.environ.get("PHI_NER_THRESHOLD")
     entities = []
-    for window, labels in zip(offsets, predictions):
-        for (start, end), label in zip(window, labels):
-            phi_type = LABEL_TYPES.get(model.config.id2label[label].split("-")[-1])
-            if end > start and phi_type:
-                entities.append((start, end, phi_type))
+    for start, end, phi_type, score, is_top in _token_scores(text):
+        if is_top if threshold is None else score >= float(threshold):
+            entities.append((start, end, phi_type))
     return entities
 
 

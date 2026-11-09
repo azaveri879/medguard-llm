@@ -60,6 +60,26 @@ class RedactEntitiesTests(unittest.TestCase):
         model.assert_not_called()
 
 
+class ThresholdTests(unittest.TestCase):
+    TOKENS = [(0, 4, "NAME", 0.9, True), (5, 9, "NAME", 0.3, False), (10, 14, "DATE", 0.05, False)]
+
+    def entities(self, threshold):
+        env = {} if threshold is None else {"PHI_NER_THRESHOLD": str(threshold)}
+        with mock.patch.object(ner_redaction, "_token_scores", return_value=self.TOKENS), \
+                mock.patch.dict(ner_redaction.os.environ, env):
+            if threshold is None:
+                ner_redaction.os.environ.pop("PHI_NER_THRESHOLD", None)
+            return ner_redaction._token_entities("text")
+
+    def test_default_uses_the_top_label(self):
+        self.assertEqual(self.entities(None), [(0, 4, "NAME")])
+
+    def test_lower_threshold_keeps_more_tokens(self):
+        self.assertEqual(len(self.entities(0.5)), 1)
+        self.assertEqual(len(self.entities(0.2)), 2)
+        self.assertEqual(len(self.entities(0.05)), 3)
+
+
 class PipelineTests(unittest.TestCase):
     def test_rules_run_first_and_counts_combine(self):
         text = "SSN: 555-12-3456. Anna Kowalski called."

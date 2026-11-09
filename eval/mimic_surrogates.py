@@ -161,6 +161,9 @@ def surrogate_note(text: str, rng: random.Random) -> Dict:
     return {"text": result, "spans": spans + keep, "known_names": known_names}
 
 
+DEFAULT_SEED = 20261109
+
+
 def sample_notes(stream: Iterable[str], per_category: int = 200, seed: int = 20261109) -> List[Dict]:
     """Reservoir-sample tagged notes per category and return them with surrogates."""
     csv.field_size_limit(sys.maxsize)
