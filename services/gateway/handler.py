@@ -7,6 +7,11 @@ import boto3
 
 from phi_redaction import phi_redact
 
+if os.environ.get("PHI_NER_ENABLED", "false").lower() == "true":
+    from ner_redaction import phi_redact_with_ner as redact_input
+else:
+    redact_input = phi_redact
+
 bedrock = boto3.client("bedrock-runtime")
 s3 = boto3.client("s3")
 ddb = boto3.client("dynamodb")
@@ -125,7 +130,7 @@ def handler(event, context):
         request_id = _sha256(f"{time.time()}:{user_id}:{_sha256(prompt)}")[:24]
 
         inj = injection_score(prompt)
-        redacted_prompt, phi_in = phi_redact(prompt)
+        redacted_prompt, phi_in = redact_input(prompt)
 
         # Simple policy example
         if role == "student" and "full note" in (prompt or "").lower():

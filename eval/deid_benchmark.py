@@ -97,6 +97,13 @@ def roberta_detector() -> Detector:
     return detect
 
 
+def pipeline_detector() -> Detector:
+    """The gateway's production path: rules, then the model on what they left."""
+    from ner_redaction import phi_redact_with_ner
+
+    return lambda text: spans_from_redacted(text, phi_redact_with_ner(text)[0])
+
+
 def _covered(text: str, start: int, end: int, marks: List[bool]) -> Tuple[int, int]:
     """Return (covered, total) counts of letters and digits in a range."""
     total = covered = 0
@@ -182,7 +189,12 @@ def main():
     else:
         notes = generate_notes(args.notes)
 
-    builders = {"regex": regex_detector, "presidio": presidio_detector, "roberta": roberta_detector}
+    builders = {
+        "regex": regex_detector,
+        "presidio": presidio_detector,
+        "roberta": roberta_detector,
+        "pipeline": pipeline_detector,
+    }
     cache: Dict[str, Detector] = {}
     results = {}
     for name in args.detectors.split(","):

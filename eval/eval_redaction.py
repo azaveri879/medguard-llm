@@ -49,7 +49,7 @@ def main():
     args = parser.parse_args()
 
     cases = json.loads(Path(args.suite).read_text())[args.split]
-    redact = load_handler("unused").phi_redact
+    redact = load_handler("unused").redact_input
     caught, total, kept, keep_total, missed, lost = evaluate(cases, redact)
 
     print(f"Split: {args.split} ({len(cases)} notes)")

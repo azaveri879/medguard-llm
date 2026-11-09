@@ -1,6 +1,7 @@
 import * as cdk from "aws-cdk-lib";
 import { Construct } from "constructs";
 import * as ec2 from "aws-cdk-lib/aws-ec2";
+import * as ecrAssets from "aws-cdk-lib/aws-ecr-assets";
 import * as s3 from "aws-cdk-lib/aws-s3";
 import * as dynamodb from "aws-cdk-lib/aws-dynamodb";
 import * as iam from "aws-cdk-lib/aws-iam";
@@ -80,11 +81,9 @@ export class MedGuardStack extends cdk.Stack {
       removalPolicy: cdk.RemovalPolicy.DESTROY,
     });
 
-    const gatewayFn = new lambda.Function(this, "GatewayFn", {
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: "handler.handler",
-      code: lambda.Code.fromAsset(path.join(__dirname, "../../services/gateway")),
-      memorySize: 1024,
+    const enableNer = this.node.tryGetContext("enableNer") === "true";
+    const gatewayDir = path.join(__dirname, "../../services/gateway");
+    const gatewayProps = {
       timeout: cdk.Duration.seconds(30),
       vpc,
       vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_ISOLATED },
@@ -93,9 +92,26 @@ export class MedGuardStack extends cdk.Stack {
         AUDIT_PREFIX: "events/",
         DDB_TABLE: auditTable.tableName,
         BEDROCK_MODEL_ID: bedrockModelId,
+        PHI_NER_ENABLED: enableNer ? "true" : "false",
       },
       logGroup,
-    });
+    };
+
+    const gatewayFn: lambda.Function = enableNer
+      ? new lambda.DockerImageFunction(this, "GatewayFn", {
+          ...gatewayProps,
+          code: lambda.DockerImageCode.fromImageAsset(gatewayDir, {
+            platform: ecrAssets.Platform.LINUX_AMD64,
+          }),
+          memorySize: 6144,
+        })
+      : new lambda.Function(this, "GatewayFn", {
+          ...gatewayProps,
+          runtime: lambda.Runtime.PYTHON_3_11,
+          handler: "handler.handler",
+          code: lambda.Code.fromAsset(gatewayDir),
+          memorySize: 1024,
+        });
 
     // IAM perms for S3 + DDB + Bedrock
     auditBucket.grantPut(gatewayFn);
