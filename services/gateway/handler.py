@@ -5,6 +5,8 @@ import hashlib
 import re
 import boto3
 
+from phi_redaction import phi_redact
+
 bedrock = boto3.client("bedrock-runtime")
 s3 = boto3.client("s3")
 ddb = boto3.client("dynamodb")
@@ -42,47 +44,6 @@ def injection_score(text: str) -> int:
         matches = len(re.findall(pattern, t, re.IGNORECASE))
         score += matches
     return score
-
-
-def phi_redact(text: str):
-    # MVP ONLY. Replace with Presidio/medspaCy/transformer NER ASAP.
-    redactions = {}
-    out = text or ""
-
-    def _sub(pattern, repl, key):
-        nonlocal out
-        matches = len(re.findall(pattern, out))
-        if matches > 0:
-            redactions[key] = redactions.get(key, 0) + matches
-            out = re.sub(pattern, repl, out)
-        return matches
-
-    # Email addresses
-    _sub(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "[PHI_EMAIL]", "EMAIL")
-    
-    # Phone numbers (various formats)
-    _sub(r"\b(\+?1[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b", "[PHI_PHONE]", "PHONE")
-    
-    # Dates (MM/DD/YYYY, MM-DD-YYYY, etc.)
-    _sub(r"\b\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4}\b", "[PHI_DATE]", "DATE")
-    
-    # SSN (XXX-XX-XXXX)
-    _sub(r"\b\d{3}[-.\s]?\d{2}[-.\s]?\d{4}\b", "[PHI_SSN]", "SSN")
-    
-    # MRN (Medical Record Number - typically 6-10 digits)
-    _sub(r"\bMRN[:\s]*\d{6,10}\b", "[PHI_MRN]", "MRN")
-    _sub(r"\bMedical Record Number[:\s]*\d{6,10}\b", "[PHI_MRN]", "MRN")
-    
-    # Names (common patterns: "Patient Name:", "Dr. First Last", "Last, First")
-    # This is a simple heuristic - names are hard to detect accurately
-    _sub(r"\b(?:Patient|PATIENT)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)", "[PHI_NAME]", "NAME")
-    _sub(r"\bDr\.\s+[A-Z][a-z]+\s+[A-Z][a-z]+\b", "[PHI_NAME]", "NAME")
-    _sub(r"\b[A-Z][a-z]+,\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)?\b", "[PHI_NAME]", "NAME")
-    
-    # Addresses (simple pattern: number + street name)
-    _sub(r"\b\d+\s+[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s+(?:St|Street|Ave|Avenue|Rd|Road|Dr|Drive|Blvd|Boulevard|Ln|Lane)[,\s]+[A-Z][a-z]+(?:\s+[A-Z]{2})?\s+\d{5}(?:-\d{4})?\b", "[PHI_ADDRESS]", "ADDRESS")
-
-    return out, redactions
 
 
 def system_prompt(role: str) -> str:
