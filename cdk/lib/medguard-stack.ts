@@ -17,7 +17,7 @@ export class MedGuardStack extends cdk.Stack {
     // ---------- Config ----------
     const bedrockModelId =
       this.node.tryGetContext("bedrockModelId") ??
-      "anthropic.claude-3-haiku-20240307-v1:0"; // Base model ID
+      "us.anthropic.claude-haiku-4-5-20251001-v1:0"; // Base model ID
     const enableAuth =
       this.node.tryGetContext("enableAuth") !== "false"; // Default: true, set to "false" to disable
 

@@ -75,7 +75,7 @@ note_id,note_type,text
 python3 mimic_eval.py \
   --mimic-path datasets/mimic_notes.csv \
   --medguard-url https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/prod/v1/chat \
-  --baseline-model anthropic.claude-3-haiku-20240307-v1:0 \
+  --baseline-model us.anthropic.claude-haiku-4-5-20251001-v1:0 \
   --task problem_list \
   --num-notes 100 \
   --num-injections 50 \

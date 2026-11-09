@@ -1,7 +1,7 @@
 #!/bin/bash
 # Test Bedrock model access directly
 
-MODEL_ID="${1:-anthropic.claude-3-haiku-20240307-v1:0}"
+MODEL_ID="${1:-us.anthropic.claude-haiku-4-5-20251001-v1:0}"
 REGION="${2:-us-east-1}"
 
 echo "Testing Bedrock model access for: $MODEL_ID"
@@ -38,7 +38,7 @@ else
     echo "To subscribe:"
     echo "1. Go to: https://console.aws.amazon.com/bedrock/"
     echo "2. Click 'Model catalog' in the left sidebar"
-    echo "3. Find 'Claude 3 Haiku'"
+    echo "3. Find 'Claude Haiku 4.5'"
     echo "4. Click 'Subscribe' (if available)"
     echo "5. Wait a few minutes for activation"
 fi

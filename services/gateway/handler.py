@@ -100,7 +100,7 @@ User role: {role}
 
 
 def invoke_bedrock(system: str, user: str, max_tokens=700, temperature=0.2) -> str:
-    # Anthropic message format for Claude 3 Haiku
+    # Anthropic message format for Claude Haiku 4.5
     body = {
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": max_tokens,
