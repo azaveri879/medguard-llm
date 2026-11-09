@@ -1,0 +1,3 @@
+Configuration,Mean (ms),P50 (ms),P95 (ms)
+baseline,1385.6,1456.8,1956.1
+medguard,2534.2,2351.4,4229.8

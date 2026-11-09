@@ -1,0 +1,21 @@
+{
+  "name": "medguard-cdk",
+  "version": "1.0.0",
+  "description": "CDK stack for MedGuard LLM security gateway",
+  "main": "bin/cdk.js",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "jest",
+    "cdk": "cdk"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "aws-cdk": "2.1100.1",
+    "typescript": "~5.3.0"
+  },
+  "dependencies": {
+    "aws-cdk-lib": "^2.233.0",
+    "constructs": "^10.0.0"
+  }
+}

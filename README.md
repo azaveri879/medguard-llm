@@ -6,7 +6,7 @@ MedGuard is a defense-in-depth security gateway designed to enable safe deployme
 
 ### Research Prototype - Unit Tests Passing
 
-> **Status:** Research prototype, not production ready. Unit tests pass on a small hand-written suite, but the evaluation does not yet show an improvement over a direct-Bedrock baseline. See [Roadmap](#roadmap-revisited-november-2026).
+> **Status:** Research prototype, not production ready. Unit tests pass on a small hand-written suite, but in the evaluation MedGuard prevents PHI from appearing in responses mainly by refusing to summarize clinical notes, so it does not yet show a usable improvement over a direct-Bedrock baseline. See [Roadmap](#roadmap-revisited-november-2026).
 
 **Last Verified:** January 3, 2026  
 **Unit Test Status:** 15/15 tests passing on a small controlled suite
@@ -410,8 +410,10 @@ cdk diff           # Compare with deployed stack
 ### Current State
 
 - **AWS infrastructure torn down** (Nov 2026) to stop VPC interface endpoint charges. Retained resources (MIMIC-IV S3 bucket, audit buckets, DynamoDB tables, Cognito pool) may still exist. Redeploy with `cdk deploy` only when end-to-end testing is needed.
-- **The evaluation does not yet show a benefit.** In `eval/results/baseline_comparison.md`, direct Bedrock already scores 0% PHI leakage and 0% attack success rate, the same as MedGuard, which adds ~1.1s of latency. The test suite is too small (3 PHI, 5 injection, 2 utility cases) and too easy to separate the two.
-- **Eval injection detection is 60%**, compared with 100% on the separate 12-attack test suite in `tests/`.
+- **MedGuard avoids PHI leakage by refusing the task.** In `eval/results/baseline_comparison.md`, direct Bedrock repeats identifiers in 3 of 3 clinical notes and MedGuard in none, but MedGuard refuses all 3 notes (60% of the 5 benign requests) and adds ~1.1s of latency.
+- **PHI detection misses cases.** It finds 88% of expected PHI types (15 of 17); the regexes miss the address in one note and the name in another.
+- **The injection result doesn't separate the two.** MedGuard flags 5 of 5 attacks but also flags 1 of 5 benign requests. Attack success is 0% for both, because these 5 attacks are easy enough that the model refuses them unaided.
+- **The test suite is small** (3 PHI, 5 injection, 2 utility cases), so these rates are illustrative. Earlier versions of these tables reported hardcoded zeros for leakage and attack success; results now come from `eval/scoring.py`.
 - **MIMIC-IV notes are already de-identified** (names replaced with `___`), so measuring PHI recall on them requires injecting realistic synthetic PHI or using a labeled de-ID dataset (e.g. i2b2/n2c2 2014).
 - **Claude 3 Haiku is outdated.** Newer models resist injection better on their own, which makes the baseline gap harder to show.
 
@@ -491,7 +493,7 @@ pip3 install -r requirements.txt
 
 # Or run manually
 python3 run_eval.py \
-  --medguard-url https://rr7xrc9ucl.execute-api.us-east-1.amazonaws.com/prod/v1/chat \
+  --medguard-url https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/prod/v1/chat \
   --baseline-model anthropic.claude-3-haiku-20240307-v1:0 \
   --mode baseline \
   --output-dir results
