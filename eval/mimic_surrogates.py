@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""
+Turn MIMIC-III notes into a labeled de-identification benchmark.
+
+MIMIC-III replaces PHI with typed tags such as [**Known lastname 123**]. Each tag
+is swapped for a fake value of the same type, which gives real clinical writing
+with exact span labels. Notes are held in memory only and must never be written
+to this repository or printed; MIMIC is credentialed data.
+
+Year-only dates and states are allowed under HIPAA Safe Harbor, and initials are
+too short to score reliably, so those spans are marked SKIP and left unscored.
+"""
+
+import csv
+import random
+import re
+import sys
+from typing import Dict, Iterable, List
+
+from deid_data import CITIES, EPONYMS, FIRST_NAMES, LAST_NAMES, MONTHS, STREETS, STREET_TYPES
+
+TAG = re.compile(r"\[\*\*(.*?)\*\*\]", re.DOTALL)
+DOSE = re.compile(r"\b\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)*\s*(?:mg|mcg|mL|ml|units?)\b")
+EPONYM_NAMES = sorted({term.split()[0] for term in EPONYMS}, key=len, reverse=True)
+EPONYM = re.compile(rf"\b(?:{'|'.join(map(re.escape, EPONYM_NAMES))})\b")
+
+LABELS = {
+    "full_date": "DATE", "month_day": "DATE", "month_year": "DATE", "date_range": "DATE",
+    "month_only": "MONTH", "first": "NAME", "last": "NAME", "id": "ID", "phone": "PHONE",
+    "email": "EMAIL", "street": "ADDRESS", "apartment": "ADDRESS", "city": "LOCATION",
+    "facility": "FACILITY", "age": "AGE_OVER_89", "year": "SKIP", "skip": "SKIP",
+}
+
+# First matching prefix wins, so more specific prefixes come first.
+PREFIX_KINDS = [
+    ("clip number", "id"), ("numeric identifier", "id"), ("md number", "id"),
+    ("medical record number", "id"), ("serial number", "id"), ("unit number", "id"),
+    ("social security", "id"), ("telephone", "phone"), ("pager", "phone"),
+    ("e-mail", "email"), ("street address", "street"), ("apartment address", "apartment"),
+    ("age over", "age"), ("month/day/year", "full_date"), ("month/day", "month_day"),
+    ("month/year", "month_year"), ("month day", "month_day"), ("month (only)", "month_only"),
+    ("year", "year"), ("date range", "date_range"), ("holiday", "skip"),
+    ("state", "skip"), ("country", "skip"), ("hospital", "facility"), ("wardname", "facility"),
+    ("company", "facility"), ("university", "facility"), ("location", "city"),
+    ("initial", "skip"), ("name initial", "skip"), ("name prefix", "skip"), ("name suffix", "skip"),
+    ("known firstname", "first"), ("first name", "first"), ("doctor first name", "first"),
+    ("female first name", "first"), ("male first name", "first"),
+    ("known lastname", "last"), ("last name", "last"), ("doctor last name", "last"),
+    ("name", "last"),
+]
+FACILITIES = [
+    "Mercy General Hospital", "Lakeside Medical Center", "Riverside Clinic",
+    "Northgate Community Hospital", "Hillcrest Rehabilitation", "Summit Health Partners",
+]
+
+
+def classify(inner: str) -> str:
+    """Return the kind of PHI a MIMIC tag stands for."""
+    tag = inner.strip().lower()
+    if not tag:
+        return "skip"
+    if re.fullmatch(r"\d+", tag):
+        return "year"
+    if re.fullmatch(r"\d+-\d+-\d+", tag):
+        return "full_date"
+    if re.fullmatch(r"\d+[-/]+\d+[-/]*", tag):
+        return "month_day"
+    for prefix, kind in PREFIX_KINDS:
+        if tag.startswith(prefix):
+            return kind
+    return "skip"
+
+
+def _render(kind: str, rng: random.Random) -> str:
+    month, day, year = rng.randint(1, 12), rng.randint(1, 28), rng.randint(2005, 2025)
+    name = MONTHS[month - 1]
+    if kind == "full_date":
+        return rng.choice([f"{month:02d}/{day:02d}/{year}", f"{month}/{day}/{year % 100:02d}",
+                           f"{year}-{month:02d}-{day:02d}", f"{name} {day}, {year}"])
+    if kind == "month_day":
+        return rng.choice([f"{month}/{day}", f"{month:02d}-{day:02d}", f"{name[:3]} {day}"])
+    if kind == "month_year":
+        return rng.choice([f"{month}/{year}", f"{name} {year}"])
+    if kind == "date_range":
+        return f"{month}/{day}-{month}/{min(day + 2, 28)}"
+    if kind == "month_only":
+        return name
+    if kind == "year":
+        return str(year)
+    if kind == "first":
+        return rng.choice(FIRST_NAMES)
+    if kind == "last":
+        return rng.choice(LAST_NAMES)
+    if kind == "id":
+        return str(rng.randint(10 ** 4, 10 ** 8))
+    if kind == "phone":
+        return f"{rng.randint(201, 989)}-555-{rng.randint(0, 9999):04d}"
+    if kind == "email":
+        return f"{rng.choice(FIRST_NAMES)}.{rng.choice(LAST_NAMES)}@mail.example".lower()
+    if kind == "street":
+        return f"{rng.randint(4, 9999)} {rng.choice(STREETS)} {rng.choice(STREET_TYPES)}"
+    if kind == "apartment":
+        return f"Apt {rng.randint(1, 40)}"
+    if kind == "city":
+        return rng.choice(CITIES)[0]
+    if kind == "facility":
+        return rng.choice(FACILITIES)
+    if kind == "age":
+        return str(rng.randint(90, 104))
+    return "Unknown"
+
+
+def surrogate_note(text: str, rng: random.Random) -> Dict:
+    """Replace every tag with a fake value and return {'text', 'spans'}."""
+    memo: Dict[str, str] = {}
+    pieces: List[str] = []
+    spans: List[Dict] = []
+    length = cursor = 0
+    for match in TAG.finditer(text):
+        before = text[cursor:match.start()]
+        pieces.append(before)
+        length += len(before)
+        inner = match.group(1)
+        kind = classify(inner)
+        value = memo.setdefault(inner, _render(kind, rng))
+        spans.append({"start": length, "end": length + len(value), "label": LABELS[kind]})
+        pieces.append(value)
+        length += len(value)
+        cursor = match.end()
+    pieces.append(text[cursor:])
+    result = "".join(pieces)
+
+    def overlaps_phi(start: int, end: int) -> bool:
+        return any(start < span["end"] and span["start"] < end for span in spans)
+
+    keep = [
+        {"start": m.start(), "end": m.end(), "label": "KEEP"}
+        for pattern in (DOSE, EPONYM)
+        for m in pattern.finditer(result)
+        if not overlaps_phi(m.start(), m.end())
+    ]
+    return {"text": result, "spans": spans + keep}
+
+
+def sample_notes(stream: Iterable[str], per_category: int = 200, seed: int = 20261109) -> List[Dict]:
+    """Reservoir-sample tagged notes per category and return them with surrogates."""
+    csv.field_size_limit(sys.maxsize)
+    rng = random.Random(seed)
+    reader = csv.reader(stream)
+    header = [name.lower() for name in next(reader)]
+    category_at, text_at, error_at = (header.index(n) for n in ("category", "text", "iserror"))
+
+    reservoirs: Dict[str, List[str]] = {}
+    seen: Dict[str, int] = {}
+    for row in reader:
+        if len(row) != len(header) or row[error_at].strip() or "[**" not in row[text_at]:
+            continue
+        category = row[category_at].strip()
+        count = seen[category] = seen.get(category, 0) + 1
+        reservoir = reservoirs.setdefault(category, [])
+        if len(reservoir) < per_category:
+            reservoir.append(row[text_at])
+        else:
+            slot = rng.randrange(count)
+            if slot < per_category:
+                reservoir[slot] = row[text_at]
+
+    return [
+        surrogate_note(text, rng)
+        for category in sorted(reservoirs)
+        for text in reservoirs[category]
+    ]

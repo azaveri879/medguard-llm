@@ -136,8 +136,9 @@ def score_notes(notes: List[Dict], detector: Detector) -> Dict:
                 keep_total += 1
                 keep_intact += covered == 0
                 continue
-            total[span["label"]] += 1
-            caught[span["label"]] += covered == size
+            if span["label"] != "SKIP":
+                total[span["label"]] += 1
+                caught[span["label"]] += covered == size
             for index in range(span["start"], span["end"]):
                 phi_chars[index] = True
         for match in re.finditer(r"\w+", text):
@@ -167,11 +168,16 @@ def markdown_table(results: Dict[str, Dict]) -> str:
         cells = [name, f"{sum(caught.values()) / sum(total.values()) * 100:.1f}%"]
         cells += [f"{caught.get(t, 0) / total[t] * 100:.1f}%" for t in types]
         cells += [
-            f"{result['keep_intact'] / result['keep_total'] * 100:.1f}%",
+            f"{result['keep_intact'] / max(result['keep_total'], 1) * 100:.1f}%",
             f"{result['other_words_redacted'] / result['other_words'] * 100:.1f}%",
             f"{result['ms_per_note']:.0f}",
         ]
         lines.append("| " + " | ".join(cells) + " |")
+    any_result = next(iter(results.values()))
+    counts = ["Spans scored", str(sum(any_result["total"].values()))]
+    counts += [str(any_result["total"][t]) for t in types]
+    counts += [str(any_result["keep_total"]), str(any_result["other_words"]), ""]
+    lines.append("| " + " | ".join(counts) + " |")
     return "\n".join(lines)
 
 
@@ -179,11 +185,17 @@ def main():
     parser = argparse.ArgumentParser(description="Compare PHI detectors")
     parser.add_argument("--detectors", default="regex,presidio,roberta,regex+roberta")
     parser.add_argument("--data", help="JSONL of {text, spans}; defaults to synthetic notes")
+    parser.add_argument("--mimic", action="store_true", help="Read a MIMIC-III NOTEEVENTS CSV from stdin")
+    parser.add_argument("--per-category", type=int, default=200, help="MIMIC notes per category")
     parser.add_argument("--notes", type=int, default=300, help="Synthetic note count")
     parser.add_argument("--output", help="Write the Markdown table to this path")
     args = parser.parse_args()
 
-    if args.data:
+    if args.mimic:
+        from mimic_surrogates import sample_notes
+
+        notes = sample_notes(sys.stdin, args.per_category)
+    elif args.data:
         lines = Path(args.data).read_text().splitlines()
         notes = [json.loads(line) for line in lines]
     else:
