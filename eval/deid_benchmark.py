@@ -15,7 +15,7 @@ import json
 import re
 import sys
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Callable, Dict, List, Tuple
 
@@ -102,6 +102,22 @@ def pipeline_detector() -> Detector:
     from ner_redaction import phi_redact_with_ner
 
     return lambda text: spans_from_redacted(text, phi_redact_with_ner(text)[0])
+
+
+def known_name_detector(notes: List[Dict], roles: Tuple[str, ...]) -> Detector:
+    """The pipeline given only the names an EHR could supply for these roles."""
+    from known_names import redact_with_known
+    from ner_redaction import phi_redact_with_ner
+
+    names = {
+        note["text"]: [name for role in roles for name in note["known_names"][role]]
+        for note in notes
+    }
+
+    def detect(text: str) -> List[Span]:
+        return spans_from_redacted(text, redact_with_known(text, names[text], phi_redact_with_ner)[0])
+
+    return detect
 
 
 def _covered(text: str, start: int, end: int, marks: List[bool]) -> Tuple[int, int]:
@@ -206,7 +222,12 @@ def main():
         "presidio": presidio_detector,
         "roberta": roberta_detector,
         "pipeline": pipeline_detector,
+        "known-patient": lambda: known_name_detector(notes, ("patient",)),
+        "known-patient-care": lambda: known_name_detector(notes, ("patient", "care_team")),
     }
+    roles = Counter(s["role"] for n in notes for s in n["spans"] if "role" in s)
+    if roles:
+        print("Name spans by role:", dict(roles), flush=True)
     cache: Dict[str, Detector] = {}
     results = {}
     for name in args.detectors.split(","):

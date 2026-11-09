@@ -13,6 +13,6 @@ ENV PHI_NER_MODEL=/opt/model
 ENV HF_HOME=/tmp/hf
 ENV HF_HUB_OFFLINE=1
 
-COPY handler.py phi_redaction.py ner_redaction.py ${LAMBDA_TASK_ROOT}/
+COPY handler.py phi_redaction.py ner_redaction.py known_names.py ${LAMBDA_TASK_ROOT}/
 
 CMD ["handler.handler"]

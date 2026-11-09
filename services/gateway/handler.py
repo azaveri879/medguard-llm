@@ -5,6 +5,7 @@ import hashlib
 import re
 import boto3
 
+from known_names import redact_with_known
 from phi_redaction import phi_redact
 
 if os.environ.get("PHI_NER_ENABLED", "false").lower() == "true":
@@ -130,7 +131,8 @@ def handler(event, context):
         request_id = _sha256(f"{time.time()}:{user_id}:{_sha256(prompt)}")[:24]
 
         inj = injection_score(prompt)
-        redacted_prompt, phi_in = redact_input(prompt)
+        known_names = body.get("known_names") or []
+        redacted_prompt, phi_in = redact_with_known(prompt, known_names, redact_input)
 
         # Simple policy example
         if role == "student" and "full note" in (prompt or "").lower():
@@ -142,7 +144,7 @@ def handler(event, context):
             user = f"<CLINICAL_NOTE>\n{redacted_prompt}\n</CLINICAL_NOTE>\n\nTask: Provide a concise clinical summary."
             raw_out = invoke_bedrock(sys, user)
 
-        safe_out, phi_out = phi_redact(raw_out)
+        safe_out, phi_out = redact_with_known(raw_out, known_names, phi_redact)
         if phi_out:
             safe_out = re.sub(r"\[PHI_[A-Z]+\]", "[REDACTED]", safe_out)
 

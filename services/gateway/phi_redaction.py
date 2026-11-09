@@ -46,6 +46,8 @@ STRUCTURED_RULES = [
     (rf"\b{MONTH}[ \t]+\d{{1,2}}(?:st|nd|rd|th)?,?[ \t]+\d{{4}}\b", "DATE"),
     (r"\b\d{3}[-.\s]?\d{2}[-.\s]?\d{4}\b", "SSN"),
     (ADDRESS, "ADDRESS"),
+    (r"\b(?:9\d|1[0-4]\d)(?=[-\s]?(?:years?|yrs?|y/?o)\b)", "AGE"),
+    (r"(?i:(?:(?<=\bage )|(?<=\bage:)|(?<=\bage: )|(?<=\baged )|(?<=\baged:)|(?<=\baged: ))(?:9\d|1[0-4]\d)\b)", "AGE"),
 ]
 
 NAME_RULES = [

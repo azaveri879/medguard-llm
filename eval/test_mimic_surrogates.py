@@ -64,6 +64,16 @@ class SurrogateTests(unittest.TestCase):
         kept = [note["text"][s["start"]:s["end"]] for s in note["spans"] if s["label"] == "KEEP"]
         self.assertEqual(sorted(kept), ["40 mg", "Foley"])
 
+    def test_patient_tags_share_one_person_and_roles_are_recorded(self):
+        note = self.build(
+            "[**Known lastname 1**] [**Known lastname 2**] with Dr. [**Last Name (STitle) 3**] "
+            "and [**Name (NI) 4**]"
+        )
+        names = note["known_names"]
+        self.assertEqual(len(names["patient"]), 1)
+        self.assertEqual(len(names["care_team"]), 1)
+        self.assertEqual(len(names["other"]), 1)
+
     def test_every_kind_has_a_label(self):
         self.assertIn("SKIP", LABELS.values())
 

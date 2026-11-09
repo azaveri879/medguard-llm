@@ -71,6 +71,16 @@ def classify(inner: str) -> str:
     return "skip"
 
 
+def name_role(inner: str) -> str:
+    """Guess who a name tag refers to, standing in for what an EHR could supply."""
+    tag = inner.strip().lower()
+    if tag.startswith("known ") or "(ptitle)" in tag:
+        return "patient"
+    if tag.startswith("doctor ") or any(mark in tag for mark in ("(stitle)", "(md)", "(titles)")):
+        return "care_team"
+    return "other"
+
+
 def _render(kind: str, rng: random.Random) -> str:
     month, day, year = rng.randint(1, 12), rng.randint(1, 28), rng.randint(2005, 2025)
     name = MONTHS[month - 1]
@@ -113,6 +123,7 @@ def _render(kind: str, rng: random.Random) -> str:
 def surrogate_note(text: str, rng: random.Random) -> Dict:
     """Replace every tag with a fake value and return {'text', 'spans'}."""
     memo: Dict[str, str] = {}
+    known_names: Dict[str, List[str]] = {"patient": [], "care_team": [], "other": []}
     pieces: List[str] = []
     spans: List[Dict] = []
     length = cursor = 0
@@ -122,8 +133,16 @@ def surrogate_note(text: str, rng: random.Random) -> Dict:
         length += len(before)
         inner = match.group(1)
         kind = classify(inner)
-        value = memo.setdefault(inner, _render(kind, rng))
-        spans.append({"start": length, "end": length + len(value), "label": LABELS[kind]})
+        role = name_role(inner) if LABELS[kind] == "NAME" else None
+        # Every patient tag in a note refers to the same person.
+        key = f"patient_{kind}" if role == "patient" else inner
+        value = memo.setdefault(key, _render(kind, rng))
+        span = {"start": length, "end": length + len(value), "label": LABELS[kind]}
+        if role:
+            span["role"] = role
+            if value not in known_names[role]:
+                known_names[role].append(value)
+        spans.append(span)
         pieces.append(value)
         length += len(value)
         cursor = match.end()
@@ -139,7 +158,7 @@ def surrogate_note(text: str, rng: random.Random) -> Dict:
         for m in pattern.finditer(result)
         if not overlaps_phi(m.start(), m.end())
     ]
-    return {"text": result, "spans": spans + keep}
+    return {"text": result, "spans": spans + keep, "known_names": known_names}
 
 
 def sample_notes(stream: Iterable[str], per_category: int = 200, seed: int = 20261109) -> List[Dict]:
