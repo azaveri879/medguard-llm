@@ -19,7 +19,7 @@ except ImportError:
 class BaselineEvaluator:
     """Evaluate baseline (direct Bedrock) performance"""
     
-    def __init__(self, model_id: str = "anthropic.claude-3-haiku-20240307-v1:0", region: str = "us-east-1"):
+    def __init__(self, model_id: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0", region: str = "us-east-1"):
         if boto3 is None:
             raise ImportError("boto3 is required for baseline evaluation. Install with: pip install boto3")
         self.bedrock = boto3.client("bedrock-runtime", region_name=region)
@@ -155,7 +155,7 @@ class MedGuardEvaluator:
 def run_baseline_comparison(
     test_cases: List[Dict],
     medguard_url: str,
-    baseline_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0",
+    baseline_model_id: str = "us.anthropic.claude-haiku-4-5-20251001-v1:0",
     auth_token: Optional[str] = None
 ) -> Dict[str, List[Dict]]:
     """

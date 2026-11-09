@@ -6,7 +6,7 @@ MedGuard is a defense-in-depth security gateway designed to enable safe deployme
 
 ### Research Prototype - Unit Tests Passing
 
-> **Status:** Research prototype, not production ready. Unit tests pass on a small hand-written suite, but in the evaluation MedGuard prevents PHI from appearing in responses mainly by refusing to summarize clinical notes, so it does not yet show a usable improvement over a direct-Bedrock baseline. See [Roadmap](#roadmap-revisited-november-2026).
+> **Status:** Research prototype, not production ready. Unit tests pass on a small hand-written suite, and in a small evaluation on Claude Haiku 4.5, MedGuard summarized clinical notes without repeating known identifiers, while direct Bedrock repeated them every time. The suite is too small to support broader claims. See [Roadmap](#roadmap-revisited-november-2026).
 
 **Last Verified:** January 3, 2026  
 **Unit Test Status:** 15/15 tests passing on a small controlled suite
@@ -85,7 +85,7 @@ The Lambda handler implements a 7-step security pipeline:
 2. **PHI Detection**: Scan input for PHI (7 types) and redact
 3. **Injection Scoring**: Heuristic pattern matching (12 patterns) for prompt injection attempts
 4. **Policy Enforcement**: Apply RBAC rules (e.g., students cannot request full notes)
-5. **Bedrock Invocation**: Call Claude 3 Haiku with hardened system prompt
+5. **Bedrock Invocation**: Call Claude Haiku 4.5 with hardened system prompt
 6. **Output Guard**: Scan output for PHI and verbatim leakage
 7. **Audit Logging**: Write immutable records to S3 and metadata to DynamoDB
 
@@ -150,7 +150,7 @@ cdk output MedGuardStack.UserPoolClientId
 1. Fill out the Anthropic use case form in AWS Bedrock Console
 2. Some models may require AWS Marketplace subscription:
    - Go to [Bedrock Model Catalog](https://console.aws.amazon.com/bedrock/)
-   - Find your model (e.g., Claude 3 Haiku)
+   - Find your model (e.g., Claude Haiku 4.5)
    - Click "Subscribe" if available
    - Wait 2-5 minutes for activation
 
@@ -285,7 +285,7 @@ The tool generates:
   "request_id": "abc123...",
   "user_id": "user123",
   "role": "resident",
-  "model_id": "anthropic.claude-3-haiku-20240307-v1:0",
+  "model_id": "us.anthropic.claude-haiku-4-5-20251001-v1:0",
   "prompt_hash": "sha256_hash",
   "injection_score": 0,
   "phi_counts": {"in": {...}, "out": {...}},
@@ -339,7 +339,7 @@ aws cognito-idp initiate-auth \
 
 ### CDK Context Variables
 
-- `bedrockModelId`: Bedrock model ID (default: `anthropic.claude-3-haiku-20240307-v1:0`)
+- `bedrockModelId`: Bedrock model ID (default: `us.anthropic.claude-haiku-4-5-20251001-v1:0`)
 - `enableAuth`: Enable Cognito authentication (default: `true`, set to `"false"` to disable)
 
 ### Lambda Environment Variables
@@ -410,12 +410,12 @@ cdk diff           # Compare with deployed stack
 ### Current State
 
 - **AWS infrastructure torn down** (Nov 2026) to stop VPC interface endpoint charges. Retained resources (MIMIC-IV S3 bucket, audit buckets, DynamoDB tables, Cognito pool) may still exist. Redeploy with `cdk deploy` only when end-to-end testing is needed.
-- **MedGuard avoids PHI leakage by refusing the task.** In `eval/results/baseline_comparison.md`, direct Bedrock repeats identifiers in 3 of 3 clinical notes and MedGuard in none, but MedGuard refuses all 3 notes (60% of the 5 benign requests) and adds ~1.1s of latency.
-- **PHI detection misses cases.** It finds 88% of expected PHI types (15 of 17); the regexes miss the address in one note and the name in another.
-- **The injection result doesn't separate the two.** MedGuard flags 5 of 5 attacks but also flags 1 of 5 benign requests. Attack success is 0% for both, because these 5 attacks are easy enough that the model refuses them unaided.
+- **PHI results on Claude Haiku 4.5.** In `eval/results/baseline_comparison.md` (3 runs of each case, gateway run locally with `eval/run_local.py`), direct Bedrock repeats identifiers in 9 of 9 clinical note runs and MedGuard in none, and MedGuard refused 0 of 15 benign requests. Clinical quality of the summaries has not been scored. Claude 3 Haiku, now end-of-life, refused all 3 notes through the gateway.
+- **PHI redaction is not yet safe for real notes.** On 400 MIMIC-III nursing and radiology notes with synthetic identifiers in place of their de-identification tags (`eval/results/deid_benchmark_mimic.md`), the default rules find about 32% of scored PHI. Adding the optional RoBERTa pass (`cdk deploy -c enableNer=true`) finds 86%, but only 61% of names. Passing patient and care-team names through the `known_names` request field raises that to 90% of PHI and 76% of names in a simulation that assumes the EHR supplies them, so many identifiers can still reach the model. Much higher scores on template-generated notes (`eval/results/deid_benchmark.md`) do not carry over to real clinical writing. The container image builds and runs offline but has not been deployed.
+- **Injection results are incomplete.** MedGuard flags 15 of 15 attack runs but also 3 of 15 benign runs. Attack success is unmeasured (`nan`) because these cases have no canary or other evidence of compromise.
 - **The test suite is small** (3 PHI, 5 injection, 2 utility cases), so these rates are illustrative. Earlier versions of these tables reported hardcoded zeros for leakage and attack success; results now come from `eval/scoring.py`.
 - **MIMIC-IV notes are already de-identified** (names replaced with `___`), so measuring PHI recall on them requires injecting realistic synthetic PHI or using a labeled de-ID dataset (e.g. i2b2/n2c2 2014).
-- **Claude 3 Haiku is outdated.** Newer models resist injection better on their own, which makes the baseline gap harder to show.
+- **Model choice changes the results.** The default is now Claude Haiku 4.5 because Claude 3 Haiku reached end-of-life, so any new model should be re-evaluated before use.
 
 ### Goals
 
@@ -494,7 +494,7 @@ pip3 install -r requirements.txt
 # Or run manually
 python3 run_eval.py \
   --medguard-url https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/prod/v1/chat \
-  --baseline-model anthropic.claude-3-haiku-20240307-v1:0 \
+  --baseline-model us.anthropic.claude-haiku-4-5-20251001-v1:0 \
   --mode baseline \
   --output-dir results
 

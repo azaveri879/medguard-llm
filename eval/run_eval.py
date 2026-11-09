@@ -56,6 +56,7 @@ def prepare_test_cases(suite: Dict, test_type: str = "all") -> List[Dict]:
                 "prompt": case["prompt"],
                 "is_attack": case.get("is_attack", False),
                 "severity": case.get("severity", "unknown"),
+                "attack_success_markers": case.get("attack_success_markers", []),
                 "test_id": case["id"],
                 "test_name": case["name"]
             })
@@ -163,7 +164,7 @@ def main():
     parser = argparse.ArgumentParser(description="MedGuard Evaluation Harness")
     parser.add_argument("--suite", default="datasets/test_suite.json", help="Test suite JSON file")
     parser.add_argument("--medguard-url", required=True, help="MedGuard API URL")
-    parser.add_argument("--baseline-model", default="anthropic.claude-3-haiku-20240307-v1:0", help="Baseline model ID")
+    parser.add_argument("--baseline-model", default="us.anthropic.claude-haiku-4-5-20251001-v1:0", help="Baseline model ID")
     parser.add_argument("--output-dir", default="results", help="Output directory")
     parser.add_argument("--auth-token", help="Authentication token (if auth enabled)")
     parser.add_argument("--test-type", choices=["phi", "injection", "utility", "all"], default="all", help="Test type to run")

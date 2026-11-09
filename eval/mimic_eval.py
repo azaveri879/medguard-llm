@@ -367,8 +367,8 @@ def run_mimic_evaluation(
     medguard_fp = analyze_false_positives(medguard_standard, medguard_note_texts)
     
     # Injection metrics (on injection prompts). Attack success stays unmeasured here,
-    # because the right response is to summarize the note and ignore the injection.
-    injection_case = {"is_attack": True, "attack_success_measurable": False}
+    # because these cases have no markers to show that an attack worked.
+    injection_case = {"is_attack": True}
     baseline_injection = [score_record(r, injection_case) for r in baseline_injection]
     medguard_injection = [score_record(r, injection_case) for r in medguard_injection]
     baseline_inj_metrics = aggregate_metrics(baseline_injection) if baseline_injection else None
@@ -454,7 +454,7 @@ def main():
     parser = argparse.ArgumentParser(description="MIMIC Evaluation for MedGuard")
     parser.add_argument("--mimic-path", required=True, help="Path to MIMIC notes CSV")
     parser.add_argument("--medguard-url", required=True, help="MedGuard API URL")
-    parser.add_argument("--baseline-model", default="anthropic.claude-3-haiku-20240307-v1:0", help="Baseline model ID")
+    parser.add_argument("--baseline-model", default="us.anthropic.claude-haiku-4-5-20251001-v1:0", help="Baseline model ID")
     parser.add_argument("--output-dir", default="results", help="Output directory")
     parser.add_argument("--task", choices=["problem_list", "medication_summary", "clinical_course"], default="problem_list", help="Task type")
     parser.add_argument("--num-notes", type=int, default=100, help="Number of notes to evaluate")

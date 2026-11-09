@@ -1,0 +1,158 @@
+{
+  "_comment": "Synthetic notes for measuring the PHI redactor. Tune against dev only; holdout is for final measurement. 'phi' must be removed and 'keep' must survive.",
+  "dev": [
+    {
+      "id": "dev_01",
+      "text": "DISCHARGE SUMMARY\nPatient Name: Maria Rodriguez\nMedical Record Number: 98765432\nDate of Birth: 03/22/1978\nContact: maria.rodriguez@hospital.com, (415) 555-9876\nDIAGNOSIS: Community-acquired pneumonia\nTreated with ceftriaxone and azithromycin.",
+      "phi": [
+        {"type": "NAME", "value": "Maria Rodriguez"},
+        {"type": "MRN", "value": "98765432"},
+        {"type": "DATE", "value": "03/22/1978"},
+        {"type": "EMAIL", "value": "maria.rodriguez@hospital.com"},
+        {"type": "PHONE", "value": "(415) 555-9876"}
+      ],
+      "keep": ["Community-acquired pneumonia", "ceftriaxone", "azithromycin"]
+    },
+    {
+      "id": "dev_02",
+      "text": "PATIENT: John Smith\nAddress: 123 Main St, Boston, MA 02115\nSSN: 555-12-3456\nChief complaint: Chest pain, shortness of breath.\nSmith denies fever.",
+      "phi": [
+        {"type": "NAME", "value": "John Smith"},
+        {"type": "ADDRESS", "value": "123 Main St"},
+        {"type": "ADDRESS", "value": "02115"},
+        {"type": "SSN", "value": "555-12-3456"}
+      ],
+      "keep": ["Chest pain", "shortness of breath", "fever"]
+    },
+    {
+      "id": "dev_03",
+      "text": "Name: Baker, Thomas\nMeds: Aspirin, Lisinopril, Metformin\nExam: Lungs clear. Heart, Abdomen unremarkable.\nTaper prednisone 5/10/20 mg over one week. BP 128/76.",
+      "phi": [
+        {"type": "NAME", "value": "Baker, Thomas"}
+      ],
+      "keep": ["Aspirin, Lisinopril, Metformin", "Heart, Abdomen", "5/10/20 mg", "128/76"]
+    },
+    {
+      "id": "dev_04",
+      "text": "MRN 7654321. Seen on March 4, 2025 by Dr. Patel. Mr. Alvarez reports improved cough. Follow up in 3-6 months.",
+      "phi": [
+        {"type": "MRN", "value": "7654321"},
+        {"type": "DATE", "value": "03/04/2025"},
+        {"type": "NAME", "value": "Patel"},
+        {"type": "NAME", "value": "Alvarez"}
+      ],
+      "keep": ["improved cough", "3-6 months"]
+    },
+    {
+      "id": "dev_05",
+      "text": "DOB: 1979-04-12\nFax: 617.555.0101\nSSN 123 45 6789\nMRN: 1234567890\nA1c 7.2, LDL 110.",
+      "phi": [
+        {"type": "DATE", "value": "1979-04-12"},
+        {"type": "PHONE", "value": "617.555.0101"},
+        {"type": "SSN", "value": "123 45 6789"},
+        {"type": "MRN", "value": "1234567890"}
+      ],
+      "keep": ["A1c 7.2", "LDL 110"]
+    },
+    {
+      "id": "dev_06",
+      "text": "Pt: Linda Nguyen\nEmergency contact: Paul Nguyen 617-555-0199\nAttending: Grace Okoye, MD\nLinda Nguyen tolerated the procedure well.",
+      "phi": [
+        {"type": "NAME", "value": "Linda Nguyen"},
+        {"type": "NAME", "value": "Paul Nguyen"},
+        {"type": "PHONE", "value": "617-555-0199"},
+        {"type": "NAME", "value": "Grace Okoye"}
+      ],
+      "keep": ["tolerated the procedure well"]
+    },
+    {
+      "id": "dev_07",
+      "text": "Lives at 45 Oak Avenue, Apt 3, Cambridge, MA 02139 with spouse. Patient reports Stable Angina on exertion.",
+      "phi": [
+        {"type": "ADDRESS", "value": "45 Oak Avenue"},
+        {"type": "ADDRESS", "value": "02139"}
+      ],
+      "keep": ["Stable Angina", "exertion"]
+    },
+    {
+      "id": "dev_08",
+      "text": "John Carter is a 58-year-old man with Type 2 Diabetes Mellitus and CKD Stage 3.",
+      "phi": [
+        {"type": "NAME", "value": "John Carter"}
+      ],
+      "keep": ["Type 2 Diabetes Mellitus", "CKD Stage 3"]
+    }
+  ],
+  "holdout": [
+    {
+      "id": "hold_01",
+      "text": "PATIENT NAME: ELENA MARKOVIC\nACCT#: 445566\nADMIT DATE: 09/30/2024\nDIAGNOSIS: ACUTE PANCREATITIS",
+      "phi": [
+        {"type": "NAME", "value": "ELENA MARKOVIC"},
+        {"type": "MRN", "value": "445566"},
+        {"type": "DATE", "value": "09/30/2024"}
+      ],
+      "keep": ["ACUTE PANCREATITIS"]
+    },
+    {
+      "id": "hold_02",
+      "text": "Pt name: Okafor, Chidi\nD.O.B. 7/4/62\nTel (312)555-0147\nHome meds: Warfarin, Digoxin, Furosemide",
+      "phi": [
+        {"type": "NAME", "value": "Okafor, Chidi"},
+        {"type": "DATE", "value": "7/4/62"},
+        {"type": "PHONE", "value": "(312)555-0147"}
+      ],
+      "keep": ["Warfarin, Digoxin, Furosemide"]
+    },
+    {
+      "id": "hold_03",
+      "text": "Mrs. Thompson was admitted on Feb. 12, 2024. Attending: Karen Liu, MD\nHome: 88 Birch Road, Springfield, IL 62704\nCXR: Right, Lower lobe opacity.",
+      "phi": [
+        {"type": "NAME", "value": "Thompson"},
+        {"type": "DATE", "value": "02/12/2024"},
+        {"type": "NAME", "value": "Karen Liu"},
+        {"type": "ADDRESS", "value": "88 Birch Road"},
+        {"type": "ADDRESS", "value": "62704"}
+      ],
+      "keep": ["Right, Lower lobe opacity"]
+    },
+    {
+      "id": "hold_04",
+      "text": "Daughter Anna Kowalski can be reached at anna.k@mail.net.\nMR#: 00392817\nDischarged to home on Levothyroxine, Atorvastatin.",
+      "phi": [
+        {"type": "NAME", "value": "Anna Kowalski"},
+        {"type": "EMAIL", "value": "anna.k@mail.net"},
+        {"type": "MRN", "value": "00392817"}
+      ],
+      "keep": ["Levothyroxine, Atorvastatin"]
+    },
+    {
+      "id": "hold_05",
+      "text": "Seen 2024-11-03 by Dr. O'Brien. SSN: 900123456.\nMs. Reyes-Ortiz has Crohn Disease, Anemia.",
+      "phi": [
+        {"type": "DATE", "value": "2024-11-03"},
+        {"type": "NAME", "value": "O'Brien"},
+        {"type": "SSN", "value": "900123456"},
+        {"type": "NAME", "value": "Reyes-Ortiz"}
+      ],
+      "keep": ["Crohn Disease, Anemia"]
+    },
+    {
+      "id": "hold_06",
+      "text": "Assessment: Diabetes, Hypertension. CT Chest, Abdomen and Pelvis negative. Aspirin 81 mg daily. Titrate levothyroxine 25/50/75 mcg. WBC 12.3, Hgb 13.1.",
+      "phi": [],
+      "keep": ["Diabetes, Hypertension", "CT Chest, Abdomen and Pelvis", "Aspirin 81 mg", "25/50/75 mcg", "WBC 12.3"]
+    },
+    {
+      "id": "hold_07",
+      "text": "Sophia Martinelli presented with syncope after standing. Sophia was seen at 400 Lakeview Blvd, Madison, WI 53703 on 10 January 2025.",
+      "phi": [
+        {"type": "NAME", "value": "Sophia Martinelli"},
+        {"type": "ADDRESS", "value": "400 Lakeview Blvd"},
+        {"type": "ADDRESS", "value": "53703"},
+        {"type": "DATE", "value": "01/10/2025"}
+      ],
+      "keep": ["syncope after standing"]
+    }
+  ]
+}

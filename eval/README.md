@@ -30,7 +30,7 @@ pip3 install -r requirements.txt
 ```bash
 python3 run_eval.py \
   --medguard-url https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/prod/v1/chat \
-  --baseline-model anthropic.claude-3-haiku-20240307-v1:0 \
+  --baseline-model us.anthropic.claude-haiku-4-5-20251001-v1:0 \
   --mode baseline \
   --output-dir results
 ```
@@ -53,7 +53,7 @@ Compare MedGuard against direct Bedrock invocation:
 ```bash
 python3 run_eval.py \
   --medguard-url $API_URL \
-  --baseline-model anthropic.claude-3-haiku-20240307-v1:0 \
+  --baseline-model us.anthropic.claude-haiku-4-5-20251001-v1:0 \
   --suite datasets/test_suite.json \
   --test-type all \
   --mode baseline \
@@ -229,7 +229,7 @@ python3 prepare_mimic.py \
 python3 mimic_eval.py \
   --mimic-path datasets/mimic_notes.csv \
   --medguard-url https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/prod/v1/chat \
-  --baseline-model anthropic.claude-3-haiku-20240307-v1:0 \
+  --baseline-model us.anthropic.claude-haiku-4-5-20251001-v1:0 \
   --task problem_list \
   --num-notes 100 \
   --num-injections 50 \

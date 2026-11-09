@@ -5,7 +5,7 @@ set -e
 
 # Configuration
 MEDGUARD_URL="${MEDGUARD_URL:-https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/prod/v1/chat}"
-BASELINE_MODEL="${BASELINE_MODEL:-anthropic.claude-3-haiku-20240307-v1:0}"
+BASELINE_MODEL="${BASELINE_MODEL:-us.anthropic.claude-haiku-4-5-20251001-v1:0}"
 OUTPUT_DIR="${OUTPUT_DIR:-results}"
 
 echo "=========================================="

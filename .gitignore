@@ -51,3 +51,6 @@ build/
 
 # Credentialed PhysioNet data (MIMIC). Never commit.
 eval/DESTINATION/
+
+# Models trained on credentialed MIMIC data. Never commit.
+eval/models/
