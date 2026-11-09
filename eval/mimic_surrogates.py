@@ -12,10 +12,11 @@ too short to score reliably, so those spans are marked SKIP and left unscored.
 """
 
 import csv
+import hashlib
 import random
 import re
 import sys
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Optional
 
 from deid_data import CITIES, EPONYMS, FIRST_NAMES, LAST_NAMES, MONTHS, STREETS, STREET_TYPES
 
@@ -81,7 +82,37 @@ def name_role(inner: str) -> str:
     return "other"
 
 
-def _render(kind: str, rng: random.Random) -> str:
+def patient_split(subject_id: str) -> str:
+    """Assign every note from a patient to the same split: 80% train, 10% tune, 10% test."""
+    bucket = int(hashlib.sha256(subject_id.strip().encode()).hexdigest(), 16) % 10
+    return "test" if bucket == 9 else "tune" if bucket == 8 else "train"
+
+
+def build_name_pools() -> Dict[str, Dict[str, List[str]]]:
+    """Return separate train and test name lists, so a model can't pass by memorizing names."""
+    from faker import Faker
+
+    locales = ["en_US", "en_GB", "en_IN", "es_ES", "es_MX", "de_DE", "fr_FR", "it_IT", "pl_PL"]
+    firsts, lasts = set(), set()
+    for locale in locales:
+        provider = Faker(locale)
+        firsts.update(provider.provider("faker.providers.person").first_names)
+        lasts.update(provider.provider("faker.providers.person").last_names)
+
+    def clean(names: Iterable[str]) -> List[str]:
+        return sorted(n for n in names if n.isascii() and n.isalpha() and len(n) >= 2)
+
+    def in_test(name: str) -> bool:
+        return int(hashlib.sha256(name.lower().encode()).hexdigest(), 16) % 5 == 0
+
+    pools: Dict[str, Dict[str, List[str]]] = {"train": {}, "test": {}}
+    for kind, names in (("first", clean(firsts)), ("last", clean(lasts))):
+        pools["test"][kind] = [n for n in names if in_test(n)]
+        pools["train"][kind] = [n for n in names if not in_test(n)]
+    return pools
+
+
+def _render(kind: str, rng: random.Random, name_pools: Optional[Dict[str, List[str]]] = None) -> str:
     month, day, year = rng.randint(1, 12), rng.randint(1, 28), rng.randint(2005, 2025)
     name = MONTHS[month - 1]
     if kind == "full_date":
@@ -98,9 +129,9 @@ def _render(kind: str, rng: random.Random) -> str:
     if kind == "year":
         return str(year)
     if kind == "first":
-        return rng.choice(FIRST_NAMES)
+        return rng.choice(name_pools["first"] if name_pools else FIRST_NAMES)
     if kind == "last":
-        return rng.choice(LAST_NAMES)
+        return rng.choice(name_pools["last"] if name_pools else LAST_NAMES)
     if kind == "id":
         return str(rng.randint(10 ** 4, 10 ** 8))
     if kind == "phone":
@@ -120,7 +151,7 @@ def _render(kind: str, rng: random.Random) -> str:
     return "Unknown"
 
 
-def surrogate_note(text: str, rng: random.Random) -> Dict:
+def surrogate_note(text: str, rng: random.Random, name_pools: Optional[Dict[str, List[str]]] = None) -> Dict:
     """Replace every tag with a fake value and return {'text', 'spans'}."""
     memo: Dict[str, str] = {}
     known_names: Dict[str, List[str]] = {"patient": [], "care_team": [], "other": []}
@@ -136,7 +167,7 @@ def surrogate_note(text: str, rng: random.Random) -> Dict:
         role = name_role(inner) if LABELS[kind] == "NAME" else None
         # Every patient tag in a note refers to the same person.
         key = f"patient_{kind}" if role == "patient" else inner
-        value = memo.setdefault(key, _render(kind, rng))
+        value = memo.setdefault(key, _render(kind, rng, name_pools))
         span = {"start": length, "end": length + len(value), "label": LABELS[kind]}
         if role:
             span["role"] = role
@@ -164,18 +195,27 @@ def surrogate_note(text: str, rng: random.Random) -> Dict:
 DEFAULT_SEED = 20261109
 
 
-def sample_notes(stream: Iterable[str], per_category: int = 200, seed: int = 20261109) -> List[Dict]:
-    """Reservoir-sample tagged notes per category and return them with surrogates."""
+def sample_notes(
+    stream: Iterable[str],
+    per_category: int = 200,
+    seed: int = 20261109,
+    split: Optional[str] = None,
+    name_pools: Optional[Dict[str, List[str]]] = None,
+) -> List[Dict]:
+    """Reservoir-sample tagged notes per category, optionally from one patient split."""
     csv.field_size_limit(sys.maxsize)
     rng = random.Random(seed)
     reader = csv.reader(stream)
     header = [name.lower() for name in next(reader)]
     category_at, text_at, error_at = (header.index(n) for n in ("category", "text", "iserror"))
+    subject_at = header.index("subject_id") if split else None
 
     reservoirs: Dict[str, List[str]] = {}
     seen: Dict[str, int] = {}
     for row in reader:
         if len(row) != len(header) or row[error_at].strip() or "[**" not in row[text_at]:
+            continue
+        if split and patient_split(row[subject_at]) != split:
             continue
         category = row[category_at].strip()
         count = seen[category] = seen.get(category, 0) + 1
@@ -188,7 +228,7 @@ def sample_notes(stream: Iterable[str], per_category: int = 200, seed: int = 202
                 reservoir[slot] = row[text_at]
 
     return [
-        surrogate_note(text, rng)
+        surrogate_note(text, rng, name_pools)
         for category in sorted(reservoirs)
         for text in reservoirs[category]
     ]

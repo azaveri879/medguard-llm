@@ -42,6 +42,10 @@ def _load_model():
         path = os.environ.get("PHI_NER_MODEL", "obi/deid_roberta_i2b2")
         tokenizer = AutoTokenizer.from_pretrained(path)
         model = AutoModelForTokenClassification.from_pretrained(path, use_safetensors=True)
+        import torch
+
+        if torch.cuda.is_available():
+            model.to("cuda")
         model.eval()
         _loaded = (tokenizer, model)
     return _loaded
@@ -59,8 +63,9 @@ def _token_scores(text: str):
     )
     offsets = encoded.pop("offset_mapping").tolist()
     encoded.pop("overflow_to_sample_mapping")
+    encoded = {key: value.to(model.device) for key, value in encoded.items()}
     with torch.no_grad():
-        probabilities = model(**encoded).logits.softmax(dim=-1)
+        probabilities = model(**encoded).logits.softmax(dim=-1).cpu()
 
     label_types = [
         LABEL_TYPES.get(model.config.id2label[index].split("-")[-1])

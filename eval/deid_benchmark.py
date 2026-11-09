@@ -203,14 +203,17 @@ def main():
     parser.add_argument("--data", help="JSONL of {text, spans}; defaults to synthetic notes")
     parser.add_argument("--mimic", action="store_true", help="Read a MIMIC-III NOTEEVENTS CSV from stdin")
     parser.add_argument("--per-category", type=int, default=200, help="MIMIC notes per category")
+    parser.add_argument("--split", choices=["train", "tune", "test"], help="Use one MIMIC patient split")
+    parser.add_argument("--faker-names", action="store_true", help="Use the held-out Faker test names")
     parser.add_argument("--notes", type=int, default=300, help="Synthetic note count")
     parser.add_argument("--output", help="Write the Markdown table to this path")
     args = parser.parse_args()
 
     if args.mimic:
-        from mimic_surrogates import sample_notes
+        from mimic_surrogates import build_name_pools, sample_notes
 
-        notes = sample_notes(sys.stdin, args.per_category)
+        pools = build_name_pools()["test"] if args.faker_names else None
+        notes = sample_notes(sys.stdin, args.per_category, split=args.split, name_pools=pools)
     elif args.data:
         lines = Path(args.data).read_text().splitlines()
         notes = [json.loads(line) for line in lines]
