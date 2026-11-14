@@ -80,6 +80,24 @@ class ThresholdTests(unittest.TestCase):
         self.assertEqual(len(self.entities(0.05)), 3)
 
 
+class AgeLabelTests(unittest.TestCase):
+    def config(self, **extra):
+        labels = {0: "O", 1: "U-AGE", 2: "U-PATIENT"}
+        return mock.Mock(spec=["id2label", *extra], id2label=labels, **extra)
+
+    def test_age_is_kept_for_the_original_model(self):
+        with mock.patch.dict(ner_redaction.os.environ, {"PHI_NER_AGE_OVER_89": ""}):
+            self.assertEqual(ner_redaction._label_types(self.config()), [None, None, "NAME"])
+
+    def test_age_is_redacted_when_the_model_says_it_means_over_89(self):
+        config = self.config(medguard_age_over_89=True)
+        self.assertEqual(ner_redaction._label_types(config), [None, "AGE", "NAME"])
+
+    def test_environment_can_enable_age(self):
+        with mock.patch.dict(ner_redaction.os.environ, {"PHI_NER_AGE_OVER_89": "true"}):
+            self.assertEqual(ner_redaction._label_types(self.config()), [None, "AGE", "NAME"])
+
+
 class PipelineTests(unittest.TestCase):
     def test_rules_run_first_and_counts_combine(self):
         text = "SSN: 555-12-3456. Anna Kowalski called."

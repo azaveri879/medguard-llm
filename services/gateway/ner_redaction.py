@@ -14,8 +14,8 @@ from phi_redaction import phi_redact
 PLACEHOLDER = re.compile(r"\[(?:PHI_[A-Z]+|REDACTED)\]")
 DOSE = re.compile(r"\b\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)*\s*(?:mg|mcg|g|mL|ml|units?)\b")
 
-# Model labels mapped to redaction types. AGE and O are not redacted: ages under
-# 90 are not PHI under Safe Harbor and are clinically useful.
+# Model labels mapped to redaction types. O is not redacted, and AGE is not by
+# default: ages under 90 are not PHI under Safe Harbor and are clinically useful.
 LABEL_TYPES = {
     "PATIENT": "NAME",
     "STAFF": "NAME",
@@ -31,7 +31,19 @@ LABEL_TYPES = {
 
 MIN_SCORE = 0.01
 
+# Models fine-tuned by eval/train_deid.py use AGE only for ages over 89 and record
+# that in their config, so their AGE label can be redacted.
+AGE_OVER_89_FLAG = "medguard_age_over_89"
+
 _loaded = None
+
+
+def _label_types(config):
+    """Map each model label index to a redaction type, or None to keep the token."""
+    types = dict(LABEL_TYPES)
+    if getattr(config, AGE_OVER_89_FLAG, False) or os.environ.get("PHI_NER_AGE_OVER_89") == "true":
+        types["AGE"] = "AGE"
+    return [types.get(config.id2label[index].split("-")[-1]) for index in range(len(config.id2label))]
 
 
 def _load_model():
@@ -67,10 +79,7 @@ def _token_scores(text: str):
     with torch.no_grad():
         probabilities = model(**encoded).logits.softmax(dim=-1).cpu()
 
-    label_types = [
-        LABEL_TYPES.get(model.config.id2label[index].split("-")[-1])
-        for index in range(probabilities.shape[-1])
-    ]
+    label_types = _label_types(model.config)
     phi_mask = torch.tensor([phi_type is not None for phi_type in label_types])
     phi_scores = probabilities[..., phi_mask].sum(dim=-1).tolist()
     phi_probabilities = probabilities.masked_fill(~phi_mask, 0)

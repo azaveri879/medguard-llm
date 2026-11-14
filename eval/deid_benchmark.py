@@ -11,13 +11,15 @@ Usage (from eval/, with requirements-deid.txt installed):
 """
 
 import argparse
+import hashlib
 import json
+import random
 import re
 import sys
 import time
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "services" / "gateway"))
 
@@ -130,9 +132,35 @@ def _covered(text: str, start: int, end: int, marks: List[bool]) -> Tuple[int, i
     return covered, total
 
 
+def note_key(text: str) -> str:
+    """A short hash that identifies a note across runs without storing its text."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def bootstrap_ci(per_note: List[Dict], label: Optional[str] = None, rounds: int = 1000,
+                 seed: int = 0) -> Tuple[float, float]:
+    """95% interval for the share of PHI caught, resampling whole notes."""
+    if label is None:
+        pairs = [(sum(n["caught"].values()), sum(n["total"].values())) for n in per_note]
+    else:
+        pairs = [(n["caught"].get(label, 0), n["total"].get(label, 0)) for n in per_note]
+    rng = random.Random(seed)
+    rates = []
+    for _ in range(rounds):
+        sample = [pairs[rng.randrange(len(pairs))] for _ in pairs]
+        total = sum(t for _, t in sample)
+        if total:
+            rates.append(sum(c for c, _ in sample) / total)
+    rates.sort()
+    if not rates:
+        return float("nan"), float("nan")
+    return rates[int(0.025 * (len(rates) - 1))], rates[int(0.975 * (len(rates) - 1))]
+
+
 def score_notes(notes: List[Dict], detector: Detector) -> Dict:
     caught, total = defaultdict(int), defaultdict(int)
     keep_intact = keep_total = other_words = other_hit = 0
+    per_note = []
     started = time.perf_counter()
     all_marks = []
     for note in notes:
@@ -146,23 +174,28 @@ def score_notes(notes: List[Dict], detector: Detector) -> Dict:
     for note, marks in zip(notes, all_marks):
         text = note["text"]
         phi_chars = [False] * len(text)
+        note_caught, note_total = defaultdict(int), defaultdict(int)
         for span in note["spans"]:
             covered, size = _covered(text, span["start"], span["end"], marks)
             if span["label"] == "KEEP":
                 keep_total += 1
                 keep_intact += covered == 0
                 continue
-            if span["label"] != "SKIP":
+            if span["label"] != "SKIP" and size:
                 total[span["label"]] += 1
                 caught[span["label"]] += covered == size
+                note_total[span["label"]] += 1
+                note_caught[span["label"]] += covered == size
             for index in range(span["start"], span["end"]):
                 phi_chars[index] = True
         for match in re.finditer(r"\w+", text):
             if not any(phi_chars[match.start():match.end()]):
                 other_words += 1
                 other_hit += any(marks[match.start():match.end()])
+        per_note.append({"key": note_key(text), "caught": dict(note_caught), "total": dict(note_total)})
 
     return {
+        "per_note": per_note,
         "caught": dict(caught),
         "total": dict(total),
         "keep_intact": keep_intact,
@@ -194,6 +227,15 @@ def markdown_table(results: Dict[str, Dict]) -> str:
     counts += [str(any_result["total"][t]) for t in types]
     counts += [str(any_result["keep_total"]), str(any_result["other_words"]), ""]
     lines.append("| " + " | ".join(counts) + " |")
+
+    lines += ["", "95% intervals, resampling notes:", "",
+              "| Detector | PHI found | Names |", "|---|---|---|"]
+    for name, result in results.items():
+        cells = [name]
+        for label in (None, "NAME"):
+            low, high = bootstrap_ci(result["per_note"], label)
+            cells.append(f"{low * 100:.1f}–{high * 100:.1f}%" if low == low else "n/a")
+        lines.append("| " + " | ".join(cells) + " |")
     return "\n".join(lines)
 
 
@@ -206,10 +248,18 @@ def main():
     parser.add_argument("--split", choices=["train", "tune", "test"], help="Use one MIMIC patient split")
     parser.add_argument("--faker-names", action="store_true", help="Use the held-out Faker test names")
     parser.add_argument("--notes", type=int, default=300, help="Synthetic note count")
+    parser.add_argument("--n2c2", help="Directory of n2c2 2014 XML files (use the test set)")
     parser.add_argument("--output", help="Write the Markdown table to this path")
+    parser.add_argument("--per-note-output", help="Write per-note counts (no text) as JSON for deid_compare.py")
     args = parser.parse_args()
 
-    if args.mimic:
+    if args.n2c2:
+        from n2c2_data import load_n2c2
+
+        notes = load_n2c2(args.n2c2)
+        mismatched = sum(note["mismatched"] for note in notes)
+        print(f"n2c2 tags skipped because offsets did not match the text: {mismatched}", flush=True)
+    elif args.mimic:
         from mimic_surrogates import build_name_pools, sample_notes
 
         pools = build_name_pools()["test"] if args.faker_names else None
@@ -232,9 +282,15 @@ def main():
     if roles:
         print("Name spans by role:", dict(roles), flush=True)
     cache: Dict[str, Detector] = {}
+
+    def built(part: str) -> Detector:
+        if part not in cache:
+            cache[part] = builders[part]()
+        return cache[part]
+
     results = {}
     for name in args.detectors.split(","):
-        parts = [cache.setdefault(part, builders[part]()) for part in name.split("+")]
+        parts = [built(part) for part in name.split("+")]
         detector = lambda text, parts=parts: [span for part in parts for span in part(text)]
         results[name] = score_notes(notes, detector)
         print(f"finished {name}", flush=True)
@@ -243,6 +299,9 @@ def main():
     print(f"\n{len(notes)} notes\n{table}")
     if args.output:
         Path(args.output).write_text(table + "\n")
+    if args.per_note_output:
+        per_note = {name: result["per_note"] for name, result in results.items()}
+        Path(args.per_note_output).write_text(json.dumps(per_note))
 
 
 if __name__ == "__main__":

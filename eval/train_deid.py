@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 BASE_MODEL = "obi/deid_roberta_i2b2"
+AGE_OVER_89_FLAG = "medguard_age_over_89"  # Same name as in services/gateway/ner_redaction.py
 IGNORE_INDEX = -100
 MODEL_TYPES = {
     "DATE": "DATE", "MONTH": "DATE", "ID": "ID", "PHONE": "PHONE", "EMAIL": "EMAIL",
@@ -151,6 +152,8 @@ def main():
 
     output = Path(args.output_dir)
     output.mkdir(parents=True, exist_ok=True)
+    # Training labels AGE only for ages over 89, so the gateway may redact it.
+    setattr(model.config, AGE_OVER_89_FLAG, True)
     model.save_pretrained(output, safe_serialization=True)
     tokenizer.save_pretrained(output)
     print(f"saved model after {time.time() - started:.0f}s", flush=True)
