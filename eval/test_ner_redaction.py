@@ -97,6 +97,12 @@ class AgeLabelTests(unittest.TestCase):
         with mock.patch.dict(ner_redaction.os.environ, {"PHI_NER_AGE_OVER_89": "true"}):
             self.assertEqual(ner_redaction._label_types(self.config()), [None, "AGE", "NAME"])
 
+    def test_stanford_labels_are_redacted(self):
+        labels = {0: "O", 1: "VENDOR", 2: "DATE", 3: "HCW", 4: "HOSPITAL", 5: "ID", 6: "PATIENT", 7: "PHONE"}
+        config = mock.Mock(spec=["id2label"], id2label=labels)
+        self.assertEqual(ner_redaction._label_types(config),
+                         [None, "OTHER", "DATE", "NAME", "LOCATION", "ID", "NAME", "PHONE"])
+
 
 class PipelineTests(unittest.TestCase):
     def test_rules_run_first_and_counts_combine(self):

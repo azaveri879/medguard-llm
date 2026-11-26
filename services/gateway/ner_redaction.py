@@ -27,6 +27,10 @@ LABEL_TYPES = {
     "HOSP": "LOCATION",
     "PATORG": "LOCATION",
     "OTHERPHI": "OTHER",
+    # StanfordAIMI/stanford-deidentifier-base labels.
+    "HCW": "NAME",
+    "HOSPITAL": "LOCATION",
+    "VENDOR": "OTHER",
 }
 
 MIN_SCORE = 0.01
