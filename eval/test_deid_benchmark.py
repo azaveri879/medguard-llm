@@ -3,7 +3,7 @@
 
 import unittest
 
-from deid_benchmark import score_notes, spans_from_redacted
+from deid_benchmark import ignored_labels, score_notes, spans_from_redacted
 from deid_data import generate_notes
 
 
@@ -53,6 +53,15 @@ class ScoreTests(unittest.TestCase):
     def test_other_words_removed_are_counted(self):
         result = score_notes([self.NOTE], lambda text: [(42, 44)])
         self.assertEqual(result["other_words_redacted"], 1)
+
+
+class IgnoredLabelTests(unittest.TestCase):
+    def test_outside_and_age_labels_are_ignored(self):
+        id2label = {0: "O", 1: "B-AGE", 2: "I-AGE", 3: "B-PATIENT", 4: "AGE", 5: "DATE"}
+        self.assertEqual(ignored_labels(id2label), {0, 1, 2, 4})
+
+    def test_string_ids_from_a_config_file_become_ints(self):
+        self.assertEqual(ignored_labels({"0": "O", "1": "PATIENT"}), {0})
 
 
 if __name__ == "__main__":

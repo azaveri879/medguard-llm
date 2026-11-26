@@ -6,7 +6,7 @@ A PHI span counts as caught only when all its letters and digits are covered.
 KEEP spans are clinical terms that must not be touched.
 
 Usage (from eval/, with requirements-deid.txt installed):
-    python deid_benchmark.py --detectors regex,presidio,roberta,regex+roberta
+    python deid_benchmark.py --detectors regex,presidio,roberta,stanford,regex+roberta
     python deid_benchmark.py --data labeled.jsonl   # real corpus, one note per line
 """
 
@@ -29,6 +29,8 @@ from phi_redaction import phi_redact
 Span = Tuple[int, int]
 Detector = Callable[[str], List[Span]]
 ROBERTA_MODEL = "obi/deid_roberta_i2b2"
+# Competitor baseline: a BERT de-identifier trained on Stanford radiology and other notes.
+STANFORD_MODEL = "StanfordAIMI/stanford-deidentifier-base"
 PRESIDIO_THRESHOLD = 0.35
 
 
@@ -67,18 +69,26 @@ def presidio_detector() -> Detector:
     return detect
 
 
-def roberta_detector() -> Detector:
+def ignored_labels(id2label: Dict) -> set:
+    """Label ids a token classifier's output should not redact: outside tags and ages.
+
+    Ages under 90 are not PHI under Safe Harbor and are clinically useful.
+    """
+    return {
+        int(index) for index, label in id2label.items()
+        if label == "O" or label.endswith("AGE")
+    }
+
+
+def token_classifier_detector(model_name: str) -> Detector:
+    """Any Hugging Face token classifier, applied in overlapping 512-token windows."""
     import torch
     from transformers import AutoModelForTokenClassification, AutoTokenizer
 
-    tokenizer = AutoTokenizer.from_pretrained(ROBERTA_MODEL)
-    model = AutoModelForTokenClassification.from_pretrained(ROBERTA_MODEL, use_safetensors=True)
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForTokenClassification.from_pretrained(model_name, use_safetensors=True)
     model.eval()
-    # Ages under 90 are not PHI under Safe Harbor and are clinically useful.
-    ignored = {
-        index for index, label in model.config.id2label.items()
-        if label == "O" or label.endswith("AGE")
-    }
+    ignored = ignored_labels(model.config.id2label)
 
     def detect(text: str) -> List[Span]:
         encoded = tokenizer(
@@ -97,6 +107,10 @@ def roberta_detector() -> Detector:
         ]
 
     return detect
+
+
+def roberta_detector() -> Detector:
+    return token_classifier_detector(ROBERTA_MODEL)
 
 
 def pipeline_detector() -> Detector:
@@ -274,6 +288,7 @@ def main():
         "regex": regex_detector,
         "presidio": presidio_detector,
         "roberta": roberta_detector,
+        "stanford": lambda: token_classifier_detector(STANFORD_MODEL),
         "pipeline": pipeline_detector,
         "known-patient": lambda: known_name_detector(notes, ("patient",)),
         "known-patient-care": lambda: known_name_detector(notes, ("patient", "care_team")),
