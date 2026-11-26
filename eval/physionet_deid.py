@@ -13,6 +13,7 @@ mimic_surrogates.py, so a model trained on that generator's output cannot have
 learned their formats. Notes stay in memory and must never be printed or committed.
 """
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -57,17 +58,25 @@ def align(surrogate: str, tagged: str) -> Optional[List[Dict]]:
     return spans
 
 
-def load_physionet_deid(directory: str) -> List[Dict]:
-    """Return [{text, spans, mismatched}] for every record whose two versions line up."""
+def physionet_split(patient: str) -> str:
+    """Half the patients tune settings, the other half report results; a patient's notes stay together."""
+    return "tune" if int(hashlib.sha256(f"physionet:{patient}".encode()).hexdigest(), 16) % 2 == 0 else "test"
+
+
+def load_physionet_deid(directory: str, split: Optional[str] = None) -> List[Dict]:
+    """Return [{text, spans, mismatched, patient}] for records whose two versions line up.
+
+    split "tune" or "test" keeps one half of the patients (see physionet_split).
+    """
     surrogates = read_records(Path(directory, "id.text"))
     tagged = read_records(Path(directory, "id.res"))
     notes = []
     for key in sorted(surrogates, key=lambda k: (int(k[0]), int(k[1]))):
-        if key not in tagged:
+        if key not in tagged or (split and physionet_split(key[0]) != split):
             continue
         spans = align(surrogates[key], tagged[key])
         if spans is None:
-            notes.append({"text": surrogates[key], "spans": [], "mismatched": 1})
+            notes.append({"text": surrogates[key], "spans": [], "mismatched": 1, "patient": key[0]})
         else:
-            notes.append({"text": surrogates[key], "spans": spans, "mismatched": 0})
+            notes.append({"text": surrogates[key], "spans": spans, "mismatched": 0, "patient": key[0]})
     return notes

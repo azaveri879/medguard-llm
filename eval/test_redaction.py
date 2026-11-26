@@ -38,6 +38,15 @@ class RedactionTests(unittest.TestCase):
         for date in ("01/15/1985", "1979-04-12", "March 4, 2025"):
             self.assertEqual(phi_redact(f"Seen {date}."), ("Seen [PHI_DATE].", {"DATE": 1}))
 
+    def test_bare_month_day_dates_are_removed(self):
+        for date in ("3/12", "11-4", "12/1"):
+            self.assertEqual(phi_redact(f"Seen on {date}."), ("Seen on [PHI_DATE].", {"DATE": 1}))
+
+    def test_month_day_look_alikes_are_kept(self):
+        for text in ("Lasix q 2-4 hrs.", "RR 18-22, CPAP 5/5.", "D5 1/2 NS at 75.", "Rales 1/2 up bilaterally.",
+                     "Aspirin 81 mg 1/2 tab daily.", "BP 120/80.", "PCWP 12-15."):
+            self.assertEqual(phi_redact(text), (text, {}), text)
+
     def test_empty_input(self):
         self.assertEqual(phi_redact(None), ("", {}))
 

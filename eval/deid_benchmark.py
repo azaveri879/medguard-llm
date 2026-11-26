@@ -307,7 +307,7 @@ def main():
     elif args.physionet_deid:
         from physionet_deid import load_physionet_deid
 
-        notes = load_physionet_deid(args.physionet_deid)
+        notes = load_physionet_deid(args.physionet_deid, args.split)
         mismatched = sum(note["mismatched"] for note in notes)
         print(f"PhysioNet records skipped because the two files did not line up: {mismatched}", flush=True)
         notes = [note for note in notes if not note["mismatched"]]

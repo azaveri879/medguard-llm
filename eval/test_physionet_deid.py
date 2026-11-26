@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from physionet_deid import align, load_physionet_deid
+from physionet_deid import align, load_physionet_deid, physionet_split
 
 
 def record(patient, note, body):
@@ -40,6 +40,18 @@ class LoadTests(unittest.TestCase):
             notes = load_physionet_deid(directory)
         self.assertEqual([n["mismatched"] for n in notes], [0, 1])
         self.assertEqual(notes[0]["spans"][0]["label"], "NAME")
+
+    def test_split_keeps_patients_together_and_halves_partition(self):
+        with tempfile.TemporaryDirectory() as directory:
+            text = "".join(record(p, n, "Seen by Dr Alvarez.") for p in range(1, 41) for n in (1, 2))
+            res = "".join(record(p, n, "Seen by Dr [**Last Name (STitle) 4**].") for p in range(1, 41) for n in (1, 2))
+            Path(directory, "id.text").write_text(text)
+            Path(directory, "id.res").write_text(res)
+            tune, test = load_physionet_deid(directory, "tune"), load_physionet_deid(directory, "test")
+        self.assertEqual(len(tune) + len(test), 80)
+        self.assertTrue(tune and test)
+        self.assertFalse({n["patient"] for n in tune} & {n["patient"] for n in test})
+        self.assertEqual(physionet_split("7"), physionet_split("7"))
 
 
 if __name__ == "__main__":
