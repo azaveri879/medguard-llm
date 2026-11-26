@@ -1,4 +1,4 @@
-# Reaching 90% on PhysioNet's gold notes (one seed so far)
+# Reaching 90% on PhysioNet's gold notes
 
 Run on 2026-11-26. Scored on the **test half** of PhysioNet's gold nursing notes (1,101 notes, 85 patients; `deid_physionet_tuning.md`). Neither the settings nor the retrained model ever saw those notes. Inference ran on CPU.
 
@@ -30,6 +30,29 @@ Paired differences on the same notes:
 - Retraining, within the 0.05 + union setting: +2.6 PHI points over the base Stanford model's 80.1%. Facilities rose from 88.5% to 98.1%, dates from 93.2% to 96.6%, and over-redaction fell from 1.56% to 1.17%.
 - EHR names: +6.2 points (+4.2 to +8.3) and names +11.9 (+8.0 to +16.0), at threshold 0.05.
 - Threshold 0.02 + lexicon over 0.05, with EHR names: +1.4 points (+0.6 to +2.2).
+
+## Three seeds
+
+The retrained model was trained three times, seeds 11, 12 and 13, each on its own MIMIC sample plus the same PhysioNet tune half. Each was scored through the gateway code (`deid_benchmark.py`, setup B below) on the test half with the settings fixed in advance.
+
+| Seed | PHI found | Names | With EHR names: PHI found (95% CI) | Names | Other words removed |
+|---|---|---|---|---|---|
+| 11 | 84.2% | 74.8% | 90.1% (87.8–92.3) | 86.1% | 1.5% |
+| 12 | 85.0% | 77.2% | 91.0% (88.9–93.2) | 88.9% | 1.7% |
+| 13 | 86.0% | 77.2% | 92.0% (89.9–94.0) | 88.7% | 2.0% |
+| **Mean (SD)** | **85.1% (0.90)** | 76.4% | **91.0% (0.95)** | 87.9% | 1.7% |
+
+Paired against setup A (public Stanford model only, same notes):
+- without EHR names, +3.3 (+1.9 to +4.8), +4.1 (+2.7 to +5.6) and +5.1 (+3.5 to +6.6);
+- with them, +2.5 (+1.2 to +4.0), +3.5 (+2.2 to +4.9) and +4.4 (+3.0 to +5.9).
+
+Every seed reaches 90% with EHR names. Seed 13 sits at the 2% over-redaction limit.
+
+On the MIMIC tests run in Colab, the same three models score as follows:
+- **Default formats:** 97.5% of PHI (97.1–97.8%), against 91.2% for the base Stanford model. Names rise from 75.6% to 95.6%.
+- **Unseen formats:** 90.3% against 88.9%.
+
+Unlike the earlier retraining on the default generator (73.2% with unseen formats, `deid_unseen_formats.md`), this one did not collapse. The rich generator does produce some formats close to the unseen ones, though, so PhysioNet remains the clean test.
 
 ## Built into the gateway
 
@@ -64,7 +87,7 @@ The deployment defaults are now setup A. With `-c enableNer=true` the image bake
 
 ## Limits
 
-- **One seed.** Seeds 12 and 13 are training. This page will be updated with their spread.
+- **Three seeds,** but one corpus. The spread across seeds is about 1 point.
 - **Same source.** The tune half used in training comes from the same corpus, hospital and note type as the test half, though from different patients. This is an in-corpus held-out test, not a different hospital. n2c2 2014 remains the outside test once its portal reopens.
 - **Simulated EHR names.** They are taken from gold tag roles. A real EHR supplies names in its own forms, and nicknames or misspellings in notes would be missed.
 - **The lexicon's names come from Faker**, the same source as the MIMIC test's fake names. So the lexicon is credited only on PhysioNet, not on the MIMIC test.
