@@ -291,6 +291,7 @@ def main():
                         help="unseen: MIMIC fake values in formats the training generator never produces")
     parser.add_argument("--notes", type=int, default=300, help="Synthetic note count")
     parser.add_argument("--n2c2", help="Directory of n2c2 2014 XML files (use the test set)")
+    parser.add_argument("--physionet-deid", help="Directory with PhysioNet's gold-standard id.text and id.res")
     parser.add_argument("--output", help="Write the Markdown table to this path")
     parser.add_argument("--miss-context", default="",
                         help="Comma-separated labels; tally missed spans by the character class around them (no text)")
@@ -303,6 +304,13 @@ def main():
         notes = load_n2c2(args.n2c2)
         mismatched = sum(note["mismatched"] for note in notes)
         print(f"n2c2 tags skipped because offsets did not match the text: {mismatched}", flush=True)
+    elif args.physionet_deid:
+        from physionet_deid import load_physionet_deid
+
+        notes = load_physionet_deid(args.physionet_deid)
+        mismatched = sum(note["mismatched"] for note in notes)
+        print(f"PhysioNet records skipped because the two files did not line up: {mismatched}", flush=True)
+        notes = [note for note in notes if not note["mismatched"]]
     elif args.mimic:
         from mimic_surrogates import build_name_pools, sample_notes
 
