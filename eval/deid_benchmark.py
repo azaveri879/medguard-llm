@@ -171,8 +171,31 @@ def bootstrap_ci(per_note: List[Dict], label: Optional[str] = None, rounds: int 
     return rates[int(0.025 * (len(rates) - 1))], rates[int(0.975 * (len(rates) - 1))]
 
 
-def score_notes(notes: List[Dict], detector: Detector) -> Dict:
+def char_class(text: str, index: int) -> str:
+    """Describe one character without revealing letters or digits."""
+    if index < 0 or index >= len(text):
+        return "edge"
+    char = text[index]
+    if char.isalpha():
+        return "letter"
+    if char.isdigit():
+        return "digit"
+    if char == "\n":
+        return "newline"
+    if char.isspace():
+        return "space"
+    return repr(char)
+
+
+def miss_context(text: str, span: Dict, covered: int) -> Tuple[str, str, str, str]:
+    """(label, how much was redacted, character class before, after) for a missed span."""
+    return (span["label"], "partly" if covered else "none",
+            char_class(text, span["start"] - 1), char_class(text, span["end"]))
+
+
+def score_notes(notes: List[Dict], detector: Detector, miss_labels: Tuple[str, ...] = ()) -> Dict:
     caught, total = defaultdict(int), defaultdict(int)
+    misses: Counter = Counter()
     keep_intact = keep_total = other_words = other_hit = 0
     per_note = []
     started = time.perf_counter()
@@ -200,6 +223,8 @@ def score_notes(notes: List[Dict], detector: Detector) -> Dict:
                 caught[span["label"]] += covered == size
                 note_total[span["label"]] += 1
                 note_caught[span["label"]] += covered == size
+                if covered < size and span["label"] in miss_labels:
+                    misses[miss_context(text, span, covered)] += 1
             for index in range(span["start"], span["end"]):
                 phi_chars[index] = True
         for match in re.finditer(r"\w+", text):
@@ -210,6 +235,7 @@ def score_notes(notes: List[Dict], detector: Detector) -> Dict:
 
     return {
         "per_note": per_note,
+        "misses": misses,
         "caught": dict(caught),
         "total": dict(total),
         "keep_intact": keep_intact,
@@ -261,9 +287,13 @@ def main():
     parser.add_argument("--per-category", type=int, default=200, help="MIMIC notes per category")
     parser.add_argument("--split", choices=["train", "tune", "test"], help="Use one MIMIC patient split")
     parser.add_argument("--faker-names", action="store_true", help="Use the held-out Faker test names")
+    parser.add_argument("--surrogate-style", choices=["default", "unseen"], default="default",
+                        help="unseen: MIMIC fake values in formats the training generator never produces")
     parser.add_argument("--notes", type=int, default=300, help="Synthetic note count")
     parser.add_argument("--n2c2", help="Directory of n2c2 2014 XML files (use the test set)")
     parser.add_argument("--output", help="Write the Markdown table to this path")
+    parser.add_argument("--miss-context", default="",
+                        help="Comma-separated labels; tally missed spans by the character class around them (no text)")
     parser.add_argument("--per-note-output", help="Write per-note counts (no text) as JSON for deid_compare.py")
     args = parser.parse_args()
 
@@ -277,7 +307,8 @@ def main():
         from mimic_surrogates import build_name_pools, sample_notes
 
         pools = build_name_pools()["test"] if args.faker_names else None
-        notes = sample_notes(sys.stdin, args.per_category, split=args.split, name_pools=pools)
+        notes = sample_notes(sys.stdin, args.per_category, split=args.split, name_pools=pools,
+                             style=args.surrogate_style)
     elif args.data:
         lines = Path(args.data).read_text().splitlines()
         notes = [json.loads(line) for line in lines]
@@ -307,8 +338,13 @@ def main():
     for name in args.detectors.split(","):
         parts = [built(part) for part in name.split("+")]
         detector = lambda text, parts=parts: [span for part in parts for span in part(text)]
-        results[name] = score_notes(notes, detector)
+        miss_labels = tuple(label for label in args.miss_context.split(",") if label)
+        results[name] = score_notes(notes, detector, miss_labels)
         print(f"finished {name}", flush=True)
+        if miss_labels:
+            print(f"Missed spans for {name}, by label, how much was redacted, character before, character after:")
+            for context, count in results[name]["misses"].most_common():
+                print(f"  {count:4d}  " + " | ".join(context))
 
     table = markdown_table(results)
     print(f"\n{len(notes)} notes\n{table}")

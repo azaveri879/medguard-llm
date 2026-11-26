@@ -102,6 +102,56 @@ class SampleTests(unittest.TestCase):
         self.assertEqual(len(notes), 6)
         self.assertFalse(any("Error note" in note["text"] for note in notes))
 
+    def test_unseen_style_picks_the_same_notes(self):
+        rows = [["CATEGORY", "ISERROR", "TEXT"]]
+        rows += [["Radiology", "", f"Study {index} on [**2101-10-20**]"] for index in range(30)]
+
+        def sample(style):
+            buffer = io.StringIO()
+            csv.writer(buffer).writerows(rows)
+            buffer.seek(0)
+            return sample_notes(buffer, per_category=5, style=style)
+
+        default, unseen = sample("default"), sample("unseen")
+        self.assertEqual([n["text"].split(" on ")[0] for n in default], [n["text"].split(" on ")[0] for n in unseen])
+        self.assertNotEqual([n["text"] for n in default], [n["text"] for n in unseen])
+
+
+class UnseenStyleTests(unittest.TestCase):
+    TAGS = {
+        "full_date": "2101-10-20", "month_day": "10-20", "month_year": "Month/Year 1 2101",
+        "date_range": "Date range (1) 1", "month_only": "Month (only) 5", "id": "Medical Record Number 7",
+        "phone": "Telephone/Fax (1) 6", "street": "Street Address(1) 2", "apartment": "Apartment Address(1) 3",
+        "city": "Location (un) 8", "facility": "Hospital1 18", "age": "Age over 90 1",
+    }
+
+    def values(self, style, kind, draws=200):
+        rng = random.Random(7)
+        tag = f"[**{self.TAGS[kind]}**]"
+        return {surrogate_note(tag, rng, style=style)["text"] for _ in range(draws)}
+
+    def test_tags_classify_as_intended(self):
+        for kind, tag in self.TAGS.items():
+            self.assertEqual(classify(tag), kind, tag)
+
+    def test_unseen_values_never_match_default_values(self):
+        for kind in self.TAGS:
+            overlap = self.values("default", kind) & self.values("unseen", kind)
+            self.assertEqual(overlap, set(), kind)
+
+    def test_unseen_spans_keep_labels_and_cover_values(self):
+        text = "Pt [**Known lastname 1**] seen [**2101-10-20**], call [**Telephone/Fax (1) 6**]."
+        note = surrogate_note(text, random.Random(3), style="unseen")
+        phi = [s for s in note["spans"] if s["label"] != "KEEP"]
+        self.assertEqual([s["label"] for s in phi], ["NAME", "DATE", "PHONE"])
+        self.assertNotIn("[**", note["text"])
+        for span in phi:
+            self.assertTrue(note["text"][span["start"]:span["end"]].strip())
+
+    def test_default_style_is_unchanged(self):
+        text = "Pt [**Known lastname 1**] seen [**2101-10-20**] at [**Hospital1 18**], call [**Telephone/Fax (1) 6**]."
+        self.assertEqual(surrogate_note(text, random.Random(5)), surrogate_note(text, random.Random(5), style="default"))
+
 
 if __name__ == "__main__":
     unittest.main()

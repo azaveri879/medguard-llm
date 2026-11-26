@@ -151,8 +151,80 @@ def _render(kind: str, rng: random.Random, name_pools: Optional[Dict[str, List[s
     return "Unknown"
 
 
-def surrogate_note(text: str, rng: random.Random, name_pools: Optional[Dict[str, List[str]]] = None) -> Dict:
-    """Replace every tag with a fake value and return {'text', 'spans'}."""
+# Values and formats the default generator never produces, to test whether a model
+# retrained on its output learned PHI or only learned those formats.
+UNSEEN_STREETS = ["Juniper", "Old Mill", "Quarry", "Wexford", "Tamarack", "Harbor View"]
+UNSEEN_CITIES = ["Bozeman", "Ann Arbor", "Duluth", "Chattanooga", "Flagstaff", "Bangor", "Ithaca", "Moab"]
+UNSEEN_FACILITIES = [
+    "St. Brigid's Medical Center", "Valley Ridge Hospital", "Pinecrest Family Practice",
+    "Bayshore Surgical Associates", "Eastbrook Dialysis Unit", "Granite Peaks Health System",
+]
+ONES = ["", "-one", "-two", "-three", "-four", "-five", "-six", "-seven", "-eight", "-nine"]
+
+
+def _ordinal(day: int) -> str:
+    suffix = "th" if 11 <= day <= 13 else {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+    return f"{day}{suffix}"
+
+
+def _render_unseen(kind: str, rng: random.Random, name_pools: Optional[Dict[str, List[str]]] = None) -> str:
+    month, day, year = rng.randint(1, 12), rng.randint(1, 28), rng.randint(2005, 2025)
+    name = MONTHS[month - 1]
+    if kind == "full_date":
+        return rng.choice([f"{day} {name[:3]} {year}", f"{day:02d}.{month:02d}.{year}",
+                           f"{name[:3]}. {_ordinal(day)} {year}", f"{year}/{month:02d}/{day:02d}"])
+    if kind == "month_day":
+        return rng.choice([f"{day} {name}", f"{_ordinal(day)} of {name}", f"{name[:3]}. {_ordinal(day)}"])
+    if kind == "month_year":
+        return rng.choice([f"{name} of {year}", f"{name[:3]}-{year}", f"{name[:3]} '{year % 100:02d}"])
+    if kind == "date_range":
+        return f"{name[:3]} {day} to {name[:3]} {min(day + 2, 28)}"
+    if kind == "month_only":
+        return name[:3] + "."
+    if kind == "year":
+        return str(year)
+    if kind in ("first", "last"):
+        return _render(kind, rng, name_pools)
+    if kind == "id":
+        letters = "".join(rng.choice("ABCDEFGHJKMNPRTUVWXYZ") for _ in range(2))
+        return rng.choice([f"{letters}{rng.randint(10 ** 5, 10 ** 6 - 1)}",
+                           f"{rng.randint(100, 999)}-{rng.randint(10, 99)}-{rng.randint(1000, 9999)}-{letters[0]}",
+                           f"#{rng.randint(0, 10 ** 7):08d}"])
+    if kind == "phone":
+        area, line = rng.randint(201, 989), rng.randint(0, 9999)
+        return rng.choice([f"({area}) 555 {line:04d}", f"{area}.555.{line:04d}", f"+1 {area} 555 {line:04d}",
+                           f"{area}555{line:04d}", f"x{rng.randint(2000, 7999)}"])
+    if kind == "email":
+        return f"{rng.choice(FIRST_NAMES)[0]}{rng.choice(LAST_NAMES)}{rng.randint(1, 99)}@clinicmail.org".lower()
+    if kind == "street":
+        return rng.choice([f"{rng.randint(4, 9999)} {rng.choice('NSEW')}. {rng.choice(UNSEEN_STREETS)} Rd.",
+                           f"PO Box {rng.randint(10, 9999)}", f"Rural Route {rng.randint(1, 12)}"])
+    if kind == "apartment":
+        return rng.choice([f"Unit {rng.randint(1, 40)}{rng.choice('ABCD')}", f"#{rng.randint(100, 999)}"])
+    if kind == "city":
+        return rng.choice(UNSEEN_CITIES)
+    if kind == "facility":
+        return rng.choice(UNSEEN_FACILITIES)
+    if kind == "age":
+        age = rng.randint(90, 99)
+        return rng.choice([f"ninety{ONES[age - 90]}", f"{age}yo"])
+    return "Unknown"
+
+
+RENDERERS = {"default": _render, "unseen": _render_unseen}
+
+
+def surrogate_note(
+    text: str,
+    rng: random.Random,
+    name_pools: Optional[Dict[str, List[str]]] = None,
+    style: str = "default",
+) -> Dict:
+    """Replace every tag with a fake value and return {'text', 'spans'}.
+
+    style "unseen" writes values in formats the default generator never uses.
+    """
+    render = RENDERERS[style]
     memo: Dict[str, str] = {}
     known_names: Dict[str, List[str]] = {"patient": [], "care_team": [], "other": []}
     pieces: List[str] = []
@@ -167,7 +239,7 @@ def surrogate_note(text: str, rng: random.Random, name_pools: Optional[Dict[str,
         role = name_role(inner) if LABELS[kind] == "NAME" else None
         # Every patient tag in a note refers to the same person.
         key = f"patient_{kind}" if role == "patient" else inner
-        value = memo.setdefault(key, _render(kind, rng, name_pools))
+        value = memo.setdefault(key, render(kind, rng, name_pools))
         span = {"start": length, "end": length + len(value), "label": LABELS[kind]}
         if role:
             span["role"] = role
@@ -201,8 +273,12 @@ def sample_notes(
     seed: int = 20261109,
     split: Optional[str] = None,
     name_pools: Optional[Dict[str, List[str]]] = None,
+    style: str = "default",
 ) -> List[Dict]:
-    """Reservoir-sample tagged notes per category, optionally from one patient split."""
+    """Reservoir-sample tagged notes per category, optionally from one patient split.
+
+    The same notes are chosen whatever the surrogate style.
+    """
     csv.field_size_limit(sys.maxsize)
     rng = random.Random(seed)
     reader = csv.reader(stream)
@@ -228,7 +304,7 @@ def sample_notes(
                 reservoir[slot] = row[text_at]
 
     return [
-        surrogate_note(text, rng, name_pools)
+        surrogate_note(text, rng, name_pools, style)
         for category in sorted(reservoirs)
         for text in reservoirs[category]
     ]
