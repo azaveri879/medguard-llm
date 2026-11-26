@@ -80,3 +80,15 @@ def load_physionet_deid(directory: str, split: Optional[str] = None) -> List[Dic
         else:
             notes.append({"text": surrogates[key], "spans": spans, "mismatched": 0, "patient": key[0]})
     return notes
+
+
+def write_split(directory: str, split: str, out_dir: str) -> int:
+    """Copy one half's records of id.text and id.res, in the original format, to out_dir."""
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    kept = 0
+    for name in ("id.text", "id.res"):
+        text = Path(directory, name).read_text(encoding="utf-8", errors="replace")
+        records = [m.group(0) for m in RECORD.finditer(text) if physionet_split(m.group(1)) == split]
+        Path(out_dir, name).write_text("\n".join(records) + "\n", encoding="utf-8")
+        kept = len(records)
+    return kept

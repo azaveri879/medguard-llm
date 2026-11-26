@@ -141,6 +141,7 @@ def main():
     parser.add_argument("--learning-rate", type=float, default=2e-5)
     parser.add_argument("--seed", type=int, default=11)
     parser.add_argument("--base-model", default=BASE_MODEL)
+    parser.add_argument("--physionet-tune", help="Also train on the tune half of PhysioNet's gold notes in this directory")
     parser.add_argument("--surrogate-style", default="default", choices=["default", "rich"],
                         help="rich: fake values from large pools in many formats")
     args = parser.parse_args()
@@ -158,6 +159,13 @@ def main():
     print(f"train name pool: {len(pools['first'])} first, {len(pools['last'])} last", flush=True)
     notes = sample_notes(sys.stdin, args.per_category, args.seed, split="train", name_pools=pools,
                          style=args.surrogate_style)
+    if args.physionet_tune:
+        from physionet_deid import load_physionet_deid
+
+        # Only the tune half, whatever the directory holds: the test half is for reporting.
+        extra = [n for n in load_physionet_deid(args.physionet_tune, "tune") if not n["mismatched"]]
+        print(f"PhysioNet tune notes added: {len(extra)}", flush=True)
+        notes += extra
 
     tokenizer = AutoTokenizer.from_pretrained(args.base_model)
     model = AutoModelForTokenClassification.from_pretrained(args.base_model, use_safetensors=True).to(device)

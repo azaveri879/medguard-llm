@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from physionet_deid import align, load_physionet_deid, physionet_split
+from physionet_deid import align, load_physionet_deid, physionet_split, write_split
 
 
 def record(patient, note, body):
@@ -52,6 +52,17 @@ class LoadTests(unittest.TestCase):
         self.assertTrue(tune and test)
         self.assertFalse({n["patient"] for n in tune} & {n["patient"] for n in test})
         self.assertEqual(physionet_split("7"), physionet_split("7"))
+
+    def test_write_split_copies_only_that_half(self):
+        with tempfile.TemporaryDirectory() as directory, tempfile.TemporaryDirectory() as out:
+            Path(directory, "id.text").write_text("".join(record(p, 1, "Seen by Dr Alvarez.") for p in range(1, 21)))
+            Path(directory, "id.res").write_text("".join(record(p, 1, "Seen by Dr [**Last Name (STitle) 4**].") for p in range(1, 21)))
+            written = write_split(directory, "tune", out)
+            copied = load_physionet_deid(out)
+            expected = load_physionet_deid(directory, "tune")
+        self.assertEqual(written, len(expected))
+        self.assertEqual([n["patient"] for n in copied], [n["patient"] for n in expected])
+        self.assertTrue(all(physionet_split(n["patient"]) == "tune" for n in copied))
 
 
 if __name__ == "__main__":
