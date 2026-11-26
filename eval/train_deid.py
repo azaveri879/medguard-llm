@@ -9,6 +9,8 @@ and do not publish them.
 
 Usage (from eval/):
     python train_deid.py --output-dir models/pilot < notes.csv
+    python train_deid.py --base-model StanfordAIMI/stanford-deidentifier-base \
+        --surrogate-style rich --output-dir models/stanford_rich_seed11 < notes.csv
 """
 
 import argparse
@@ -25,12 +27,45 @@ MODEL_TYPES = {
     "DATE": "DATE", "MONTH": "DATE", "ID": "ID", "PHONE": "PHONE", "EMAIL": "EMAIL",
     "ADDRESS": "LOC", "LOCATION": "LOC", "FACILITY": "HOSP", "AGE_OVER_89": "AGE",
 }
+# StanfordAIMI/stanford-deidentifier-base has plain labels and no location, email or
+# age label. Places go to HOSPITAL and emails to ID, which the gateway redacts as
+# LOCATION and ID; an AGE label is added for ages over 89.
+STANFORD_TYPES = {
+    "DATE": "DATE", "MONTH": "DATE", "ID": "ID", "PHONE": "PHONE", "EMAIL": "ID",
+    "ADDRESS": "HOSPITAL", "LOCATION": "HOSPITAL", "FACILITY": "HOSPITAL", "AGE_OVER_89": "AGE",
+}
 
 
-def model_type(span: Dict) -> str:
+def is_bilou(label2id: Dict[str, int]) -> bool:
+    return any(label[:2] in ("B-", "I-", "L-", "U-") for label in label2id)
+
+
+def model_type(span: Dict, bilou: bool = True) -> str:
     if span["label"] == "NAME":
-        return "STAFF" if span.get("role") == "care_team" else "PATIENT"
-    return MODEL_TYPES[span["label"]]
+        if bilou:
+            return "STAFF" if span.get("role") == "care_team" else "PATIENT"
+        return "HCW" if span.get("role") == "care_team" else "PATIENT"
+    return (MODEL_TYPES if bilou else STANFORD_TYPES)[span["label"]]
+
+
+def ensure_age_label(model, torch) -> None:
+    """Give a plain-label model an AGE output, initialised from its O row."""
+    config = model.config
+    if "AGE" in config.label2id or is_bilou(config.label2id):
+        return
+    head = model.classifier
+    new = torch.nn.Linear(head.in_features, head.out_features + 1).to(head.weight.device)
+    with torch.no_grad():
+        new.weight[:-1] = head.weight
+        new.bias[:-1] = head.bias
+        new.weight[-1] = head.weight[config.label2id["O"]]
+        new.bias[-1] = head.bias[config.label2id["O"]] - 2.0
+    model.classifier = new
+    index = head.out_features
+    config.id2label = {**{int(k): v for k, v in config.id2label.items()}, index: "AGE"}
+    config.label2id = {**config.label2id, "AGE": index}
+    config.num_labels = index + 1
+    model.num_labels = index + 1  # the loss reshapes logits with this
 
 
 def window_labels(offsets: List[Tuple[int, int]], spans: List[Dict], label2id: Dict[str, int]) -> List[int]:
@@ -46,6 +81,7 @@ def window_labels(offsets: List[Tuple[int, int]], spans: List[Dict], label2id: D
                 assigned[index] = span_id
                 break
 
+    bilou = is_bilou(label2id)
     labels = []
     for index, value in enumerate(assigned):
         if value == IGNORE_INDEX:
@@ -54,6 +90,8 @@ def window_labels(offsets: List[Tuple[int, int]], spans: List[Dict], label2id: D
             labels.append(label2id["O"])
         elif entities[value]["label"] == "SKIP":
             labels.append(IGNORE_INDEX)
+        elif not bilou:
+            labels.append(label2id[model_type(entities[value], bilou=False)])
         else:
             starts = index == 0 or assigned[index - 1] != value
             ends = index == len(assigned) - 1 or assigned[index + 1] != value
@@ -102,6 +140,9 @@ def main():
     parser.add_argument("--batch-size", type=int, default=6)
     parser.add_argument("--learning-rate", type=float, default=2e-5)
     parser.add_argument("--seed", type=int, default=11)
+    parser.add_argument("--base-model", default=BASE_MODEL)
+    parser.add_argument("--surrogate-style", default="default", choices=["default", "rich"],
+                        help="rich: fake values from large pools in many formats")
     args = parser.parse_args()
 
     import torch
@@ -115,10 +156,12 @@ def main():
 
     pools = build_name_pools()["train"]
     print(f"train name pool: {len(pools['first'])} first, {len(pools['last'])} last", flush=True)
-    notes = sample_notes(sys.stdin, args.per_category, args.seed, split="train", name_pools=pools)
+    notes = sample_notes(sys.stdin, args.per_category, args.seed, split="train", name_pools=pools,
+                         style=args.surrogate_style)
 
-    tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
-    model = AutoModelForTokenClassification.from_pretrained(BASE_MODEL, use_safetensors=True).to(device)
+    tokenizer = AutoTokenizer.from_pretrained(args.base_model)
+    model = AutoModelForTokenClassification.from_pretrained(args.base_model, use_safetensors=True).to(device)
+    ensure_age_label(model, torch)
     examples = encode_notes(notes, tokenizer, model.config.label2id)
     print(f"notes: {len(notes)} | windows: {len(examples)} | device: {device}", flush=True)
 

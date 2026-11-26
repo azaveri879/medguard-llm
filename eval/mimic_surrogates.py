@@ -211,7 +211,81 @@ def _render_unseen(kind: str, rng: random.Random, name_pools: Optional[Dict[str,
     return "Unknown"
 
 
-RENDERERS = {"default": _render, "unseen": _render_unseen}
+FACILITY_SUFFIXES = [
+    "Hospital", "Medical Center", "Memorial Hospital", "Clinic", "Health Center", "Rehabilitation Center",
+    "Nursing Home", "Surgical Associates", "Community Hospital", "Regional Medical Center", "Family Practice",
+]
+WARD_UNITS = ["MICU", "SICU", "CCU", "CVICU", "NICU", "PACU", "TSICU", "CSRU"]
+_faker = None
+
+
+def _fake(rng: random.Random):
+    """A Faker instance seeded from rng, so renders stay reproducible."""
+    global _faker
+    if _faker is None:
+        from faker import Faker
+
+        _faker = Faker("en_US")
+    _faker.seed_instance(rng.randrange(2 ** 31))
+    return _faker
+
+
+def _render_rich(kind: str, rng: random.Random, name_pools: Optional[Dict[str, List[str]]] = None) -> str:
+    """Training values drawn from large pools in many formats, so a model learns PHI, not a list.
+
+    The default style draws facilities and cities from short fixed lists, and models
+    trained on it lost most facility and location recall on independent notes.
+    """
+    month, day, year = rng.randint(1, 12), rng.randint(1, 28), rng.randint(1995, 2025)
+    name = MONTHS[month - 1]
+    if kind == "full_date":
+        return rng.choice([f"{month}/{day}/{year}", f"{month:02d}/{day:02d}/{year}", f"{month}/{day}/{year % 100:02d}",
+                           f"{month}-{day}-{year % 100:02d}", f"{year}-{month:02d}-{day:02d}", f"{name} {day}, {year}",
+                           f"{name[:3]} {day} {year}", f"{day} {name} {year}"])
+    if kind == "month_day":
+        return rng.choice([f"{month}/{day}", f"{month:02d}/{day:02d}", f"{month}-{day}", f"{name} {day}",
+                           f"{name[:3]} {day}", f"{name[:3]}. {day}", f"{day} {name[:3]}"])
+    if kind == "month_year":
+        return rng.choice([f"{month}/{year}", f"{month:02d}/{year % 100:02d}", f"{name} {year}", f"{name[:3]} {year}"])
+    if kind == "date_range":
+        end = min(day + rng.randint(1, 5), 28)
+        return rng.choice([f"{month}/{day}-{month}/{end}", f"{month}/{day} - {month}/{end}", f"{name[:3]} {day}-{end}"])
+    if kind == "month_only":
+        return rng.choice([name, name[:3]])
+    if kind == "year":
+        return str(year)
+    if kind in ("first", "last"):
+        return _render(kind, rng, name_pools)
+    fake = _fake(rng)
+    if kind == "id":
+        digits = str(rng.randint(10 ** 3, 10 ** 10))
+        return rng.choice([digits, f"{fake.bothify('??').upper()}{digits[:7]}", f"{digits[:3]}-{digits[3:7]}", f"#{digits}"])
+    if kind == "phone":
+        area, mid, line = rng.randint(201, 989), rng.randint(200, 999), rng.randint(0, 9999)
+        return rng.choice([f"{area}-{mid}-{line:04d}", f"({area}) {mid}-{line:04d}", f"{area}.{mid}.{line:04d}",
+                           f"{mid}-{line:04d}", f"{area} {mid} {line:04d}", f"x{rng.randint(1000, 9999)}"])
+    if kind == "email":
+        return fake.email()
+    if kind == "street":
+        return rng.choice([fake.street_address(), f"{rng.randint(1, 999)} {fake.street_name()}"])
+    if kind == "apartment":
+        return rng.choice([f"Apt {rng.randint(1, 40)}", f"Apt. {rng.randint(1, 40)}{rng.choice('ABCD')}", f"Suite {rng.randint(100, 999)}"])
+    if kind == "city":
+        return rng.choice([fake.city(), fake.city(), f"{fake.city()}, {fake.state_abbr()}"])
+    if kind == "facility":
+        return rng.choice([
+            f"{fake.last_name()} {rng.choice(FACILITY_SUFFIXES)}",
+            f"{fake.city()} {rng.choice(FACILITY_SUFFIXES)}",
+            f"St. {fake.first_name()}'s {rng.choice(FACILITY_SUFFIXES)}",
+            f"{fake.last_name()} {rng.randint(1, 12)}",
+            rng.choice(WARD_UNITS),
+        ])
+    if kind == "age":
+        return str(rng.randint(90, 104))
+    return "Unknown"
+
+
+RENDERERS = {"default": _render, "unseen": _render_unseen, "rich": _render_rich}
 
 
 def surrogate_note(
