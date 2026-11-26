@@ -11,11 +11,14 @@ MedGuard is a defense-in-depth security gateway designed to enable safe deployme
 | Result | Measured | Source |
 |---|---|---|
 | Identifiers repeated by Claude Haiku 4.5 on clinical notes | Direct Bedrock: 9 of 9 runs. Through MedGuard: 0 of 9 (3 notes × 3 runs). | `eval/results/baseline_comparison.md` |
-| Injection attacks flagged | 15 of 15 attack runs flagged, but also 3 of 15 benign runs (20% false alarms). Attack success is not measured yet. | `eval/results/baseline_comparison.md` |
-| PHI found on real MIMIC-III notes, default model | Rules + `obi/deid_roberta_i2b2`: 85.7% of PHI, 60.5% of names (400 notes) | `eval/results/deid_benchmark_mimic.md` |
-| PHI found on real MIMIC-III notes, retrained model (pilot) | 90.9% → 99.3% of PHI, 71.8% → 98.6% of names (1,000 held-out notes, one seed, same source as training) | `eval/results/deid_colab_pilot.md` |
+| Indirect injection hidden in clinical notes (300 attacks, synthetic notes, Claude Haiku 4.5) | Attack success 10.3% direct vs 0.7% through MedGuard; 2.5% vs 0.8% excluding PHI theft. Direct summaries repeat an ID or phone number in 65 of 100 benign notes, MedGuard in 0. The regex injection score flags only 20% of attacks. | `eval/results/injection_clinical_notes.md` |
+| PHI found on real MIMIC-III notes, default model | Rules + `obi/deid_roberta_i2b2`: 90.3% of PHI, 71.3% of names (1,000 held-out notes) | `eval/results/deid_colab_3seed.md` |
+| Same notes, model retrained on our MIMIC surrogates (3 seeds) | 99.2% of PHI, 97.8% of names, but this does not generalize: 73.2% with unseen surrogate formats (vs 85.0% for the default model) | `eval/results/deid_colab_3seed.md`, `eval/results/deid_unseen_formats.md` |
+| PHI found on PhysioNet's expert-annotated gold notes (independent surrogates), default gateway | 64.8% of PHI; the MIMIC-retrained models do worse (56.0%) | `eval/results/deid_physionet_gold.md` |
+| Same corpus, held-out test half, best setting (one seed) | Stanford model retrained on rich surrogates + the tune half, date rule, threshold, model union and name lexicon: 84.3% of PHI; **90.3% with EHR-supplied patient and care-team names**, 1.55% of other words removed | `eval/results/deid_physionet_best.md` |
+| Cold start on AWS Lambda (3,008 MB) | Stanford model: 12–23 s, warm 2.6–3.3 s; RoBERTa-large model: times out | `eval/results/lambda_cold_start.md` |
 
-The PHI benchmarks put synthetic identifiers in place of MIMIC's de-identification tags. **No result here shows zero PHI leakage.** Even the best pilot configuration misses about 1 in 140 PHI spans. The 0-of-9 result covers only three notes. The retrained model has not yet been tested on an outside dataset, and its weights are not published (they derive from MIMIC). See [Roadmap](#roadmap-revisited-november-2026) for limits and next steps.
+The PHI benchmarks score recall: synthetic or author-written surrogates replace real identifiers, and a span counts only if fully redacted. **No result here shows zero PHI leakage.** Even the best setting misses about 1 in 10 PHI spans on independent notes. Retraining on one surrogate generator inflated in-distribution results, so external tests are the ones to trust. Retrained weights derive from MIMIC and are not published. See [Roadmap](#roadmap-revisited-november-2026) for limits and next steps.
 
 ### Unit tests
 
