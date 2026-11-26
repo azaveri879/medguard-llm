@@ -18,7 +18,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from mimic_surrogates import LABELS, TAG, classify
+from mimic_surrogates import LABELS, TAG, classify, name_role
 
 RECORD = re.compile(r"START_OF_RECORD=(\d+)\|\|\|\|(\d+)\|\|\|\|\n?(.*?)\|\|\|\|END_OF_RECORD", re.DOTALL)
 
@@ -53,7 +53,10 @@ def align(surrogate: str, tagged: str) -> Optional[List[Dict]]:
             return None
         start = cursor + (len(value) - len(value.lstrip()))
         stop = end - (len(value) - len(value.rstrip()))
-        spans.append({"start": start, "end": stop, "label": LABELS[classify(inner)]})
+        span = {"start": start, "end": stop, "label": LABELS[classify(inner)], "kind": classify(inner)}
+        if span["label"] == "NAME":
+            span["role"] = name_role(inner)
+        spans.append(span)
         cursor = end + len(following)
     return spans
 
@@ -78,7 +81,14 @@ def load_physionet_deid(directory: str, split: Optional[str] = None) -> List[Dic
         if spans is None:
             notes.append({"text": surrogates[key], "spans": [], "mismatched": 1, "patient": key[0]})
         else:
-            notes.append({"text": surrogates[key], "spans": spans, "mismatched": 0, "patient": key[0]})
+            text = surrogates[key]
+            known = {"patient": [], "care_team": [], "other": []}
+            for span in spans:
+                if "role" in span:
+                    value = text[span["start"]:span["end"]]
+                    if value not in known[span["role"]]:
+                        known[span["role"]].append(value)
+            notes.append({"text": text, "spans": spans, "mismatched": 0, "patient": key[0], "known_names": known})
     return notes
 
 

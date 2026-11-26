@@ -31,6 +31,31 @@ Paired differences on the same notes:
 - EHR names: +6.2 points (+4.2 to +8.3) and names +11.9 (+8.0 to +16.0), at threshold 0.05.
 - Threshold 0.02 + lexicon over 0.05, with EHR names: +1.4 points (+0.6 to +2.2).
 
+## Built into the gateway
+
+Everything above now runs in the gateway (`services/gateway/ner_redaction.py`), configured by environment variables:
+
+| Variable | Effect | Best setting |
+|---|---|---|
+| `PHI_NER_MODEL` | Primary model | `StanfordAIMI/stanford-deidentifier-base`, or a retrained copy kept off AWS |
+| `PHI_NER_THRESHOLD` | Token is PHI at this total PHI probability (empty = top label) | `0.02` |
+| `PHI_NER_EXTRA_MODELS` | Comma-separated models whose top-label detections are added | `obi/deid_roberta_i2b2` (not on Lambda) |
+| `PHI_NAME_LEXICON` | Redact words on `name_lexicon.txt` (built by `eval/build_name_lexicon.py`) | `true` |
+| request `known_names` | Patient and care-team names from the EHR | pass when available |
+
+Device words (Foley, PICC, Swan-Ganz) and eponyms before a clinical noun ("Parkinson disease", "Bell's palsy") are protected from model redaction. A bare surname is still redacted.
+
+Measured through the gateway code with `deid_benchmark.py` on the test half. The threshold for setup A was chosen on the tune half: 0.02 found 84.8% with 1.7% of other words removed, against 0.05's 83.8%.
+
+| Setup | PHI found (95% CI) | Names | With EHR names: PHI found (95% CI) | Names | Other words removed |
+|---|---|---|---|---|---|
+| A. Deployable on Lambda: public Stanford model, rules, threshold 0.02, lexicon | 80.9% (77.6–84.1) | 72.8% | 87.6% (84.8–90.1) | 85.5% | 1.7% |
+| B. Best: retrained Stanford (seed 11) + obi union, rules, threshold 0.02, lexicon (before the clinical-term protection) | 84.2% (81.4–87.2) | 74.8% | **90.1% (87.8–92.3)** | 86.1% | 1.5% |
+
+B reproduces the analysis-script numbers above within 0.2 points. The clinical-term protection changed A by 0.1 points (81.0% to 80.9%) and lowered its over-redaction from 1.8% to 1.7%.
+
+The deployment defaults are now setup A. With `-c enableNer=true` the image bakes in the Stanford model, and the stack sets `PHI_NER_THRESHOLD=0.02` and `PHI_NAME_LEXICON=true`. Each can be overridden with CDK context (`nerModel`, `nerThreshold`, `nameLexicon`). Setup B cannot run on Lambda as built. Its retrained weights derive from MIMIC and must stay off AWS, and two models do not fit Lambda's cold start (`lambda_cold_start.md`).
+
 ## What this means
 
 - **With EHR names, the gateway meets the 90% target on independent notes**, at 1.55% over-redaction. Without them it reaches 84%.

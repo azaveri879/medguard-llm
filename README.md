@@ -323,6 +323,14 @@ aws cognito-idp initiate-auth \
 - `AUDIT_PREFIX`: S3 key prefix (default: `events/`)
 - `DDB_TABLE`: DynamoDB table name
 - `BEDROCK_MODEL_ID`: Bedrock model identifier
+- `PHI_NER_ENABLED`: `true` to run the model pass after the rules (set by `-c enableNer=true`)
+- `PHI_NER_MODEL`: model directory baked into the image (default image: `StanfordAIMI/stanford-deidentifier-base`; CDK context `nerModel`, `nerRevision`, `nerWeightsRevision`)
+- `PHI_NER_THRESHOLD`: total PHI probability at which a token is redacted; empty means the model's top label (default with NER: `0.02`, context `nerThreshold`)
+- `PHI_NER_EXTRA_MODELS`: comma-separated models whose detections are added (off by default; too heavy for Lambda)
+- `PHI_NAME_LEXICON`: `true` to redact names on `services/gateway/name_lexicon.txt` (default with NER: `true`, context `nameLexicon`)
+- `nerMemoryMb` (CDK context): Lambda memory for the NER image (default 6144; new accounts may be capped at 3008)
+
+These defaults are the best single-model setting on PhysioNet's held-out gold notes. See `eval/results/deid_physionet_best.md`.
 
 ## Important Notes
 

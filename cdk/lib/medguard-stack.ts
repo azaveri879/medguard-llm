@@ -85,10 +85,10 @@ export class MedGuardStack extends cdk.Stack {
     // 6144 MB gives the NER image about 3.5 vCPUs. New accounts may be capped at
     // 3008 MB until Lambda's memory quota is raised; pass -c nerMemoryMb=3008 there.
     const nerMemoryMb = Number(this.node.tryGetContext("nerMemoryMb") ?? 6144);
-    // Hub model baked into the NER image (see services/gateway/Dockerfile). For
-    // the Stanford model: -c nerModel=StanfordAIMI/stanford-deidentifier-base
-    // -c nerRevision=661b9c1c717d3165512d440abc3700c386aefab6
-    // -c nerWeightsRevision=eca27720223180335105d76c6b6e0587ac5f103b
+    // Hub model baked into the NER image (see services/gateway/Dockerfile). The default
+    // is StanfordAIMI/stanford-deidentifier-base; for the original model:
+    // -c nerModel=obi/deid_roberta_i2b2 -c nerRevision=78f2152eb93ddd817290ce8dbe46f1a6685e09fc
+    // -c nerWeightsRevision=""
     const nerBuildArgs: Record<string, string> = {};
     for (const [key, arg] of [
       ["nerModel", "HF_MODEL"],
@@ -96,7 +96,7 @@ export class MedGuardStack extends cdk.Stack {
       ["nerWeightsRevision", "HF_WEIGHTS_REVISION"],
     ]) {
       const value = this.node.tryGetContext(key);
-      if (value) nerBuildArgs[arg] = String(value);
+      if (value !== undefined && value !== null) nerBuildArgs[arg] = String(value);
     }
     const gatewayDir = path.join(__dirname, "../../services/gateway");
     const gatewayProps = {
@@ -109,6 +109,14 @@ export class MedGuardStack extends cdk.Stack {
         DDB_TABLE: auditTable.tableName,
         BEDROCK_MODEL_ID: bedrockModelId,
         PHI_NER_ENABLED: enableNer ? "true" : "false",
+        // Best single-model setting on PhysioNet's held-out notes (eval/results/deid_physionet_best.md).
+        // Override with -c nerThreshold=... (empty for top label) and -c nameLexicon=false.
+        ...(enableNer
+          ? {
+              PHI_NER_THRESHOLD: String(this.node.tryGetContext("nerThreshold") ?? "0.02"),
+              PHI_NAME_LEXICON: String(this.node.tryGetContext("nameLexicon") ?? "true"),
+            }
+          : {}),
       },
       logGroup,
     };
