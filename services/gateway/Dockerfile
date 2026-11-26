@@ -1,13 +1,28 @@
 # Gateway image with the PHI model baked in, used when enableNer=true.
 # The gateway runs in isolated subnets, so the model cannot be downloaded at runtime.
 # Python 3.12 because the 3.11 base image's glibc is too old for current torch wheels.
+#
+# By default the image bakes in obi/deid_roberta_i2b2 from the Hugging Face Hub.
+# To bake in a local model directory instead (for example a retrained one), pass it
+# as the "model" build context:
+#   docker build --build-context model=../../eval/models/seed11 -t medguard-gateway .
+# Models retrained on MIMIC must not be pushed to any registry.
+
+# Empty unless --build-context model=DIR overrides it.
+FROM scratch AS model
+
 FROM public.ecr.aws/lambda/python:3.12
 
 COPY requirements.txt requirements-ner.txt /tmp/build/
 RUN pip install --no-cache-dir torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r /tmp/build/requirements.txt -r /tmp/build/requirements-ner.txt
 
-RUN python -c "from huggingface_hub import snapshot_download; snapshot_download('obi/deid_roberta_i2b2', revision='78f2152eb93ddd817290ce8dbe46f1a6685e09fc', allow_patterns=['*.json', '*.txt', 'merges*', 'vocab*', 'model.safetensors'], local_dir='/opt/model')"
+COPY --from=model / /opt/model/
+RUN if [ -f /opt/model/model.safetensors ]; then \
+      echo "Using the local model from the build context"; \
+    else \
+      python -c "from huggingface_hub import snapshot_download; snapshot_download('obi/deid_roberta_i2b2', revision='78f2152eb93ddd817290ce8dbe46f1a6685e09fc', allow_patterns=['*.json', '*.txt', 'merges*', 'vocab*', 'model.safetensors'], local_dir='/opt/model')"; \
+    fi
 
 ENV PHI_NER_MODEL=/opt/model
 ENV HF_HOME=/tmp/hf
