@@ -17,11 +17,23 @@ COPY requirements.txt requirements-ner.txt /tmp/build/
 RUN pip install --no-cache-dir torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --no-cache-dir -r /tmp/build/requirements.txt -r /tmp/build/requirements-ner.txt
 
+# Hub model to bake in when no local model is given. HF_WEIGHTS_REVISION is for
+# repos whose safetensors file lives on a different commit than the config, such
+# as StanfordAIMI/stanford-deidentifier-base, whose model.safetensors is only on
+# the Hub's safetensors-conversion pull request (refs/pr/5).
+ARG HF_MODEL=obi/deid_roberta_i2b2
+ARG HF_REVISION=78f2152eb93ddd817290ce8dbe46f1a6685e09fc
+ARG HF_WEIGHTS_REVISION=
+
 COPY --from=model / /opt/model/
 RUN if [ -f /opt/model/model.safetensors ]; then \
       echo "Using the local model from the build context"; \
     else \
-      python -c "from huggingface_hub import snapshot_download; snapshot_download('obi/deid_roberta_i2b2', revision='78f2152eb93ddd817290ce8dbe46f1a6685e09fc', allow_patterns=['*.json', '*.txt', 'merges*', 'vocab*', 'model.safetensors'], local_dir='/opt/model')"; \
+      python -c "import sys; from huggingface_hub import hf_hub_download, snapshot_download; \
+model, rev, weights_rev = sys.argv[1], sys.argv[2], sys.argv[3] or sys.argv[2]; \
+snapshot_download(model, revision=rev, allow_patterns=['*.json', '*.txt', 'merges*', 'vocab*'], local_dir='/opt/model'); \
+hf_hub_download(model, 'model.safetensors', revision=weights_rev, local_dir='/opt/model')" \
+        "$HF_MODEL" "$HF_REVISION" "$HF_WEIGHTS_REVISION"; \
     fi
 
 ENV PHI_NER_MODEL=/opt/model

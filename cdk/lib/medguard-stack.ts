@@ -85,6 +85,19 @@ export class MedGuardStack extends cdk.Stack {
     // 6144 MB gives the NER image about 3.5 vCPUs. New accounts may be capped at
     // 3008 MB until Lambda's memory quota is raised; pass -c nerMemoryMb=3008 there.
     const nerMemoryMb = Number(this.node.tryGetContext("nerMemoryMb") ?? 6144);
+    // Hub model baked into the NER image (see services/gateway/Dockerfile). For
+    // the Stanford model: -c nerModel=StanfordAIMI/stanford-deidentifier-base
+    // -c nerRevision=661b9c1c717d3165512d440abc3700c386aefab6
+    // -c nerWeightsRevision=eca27720223180335105d76c6b6e0587ac5f103b
+    const nerBuildArgs: Record<string, string> = {};
+    for (const [key, arg] of [
+      ["nerModel", "HF_MODEL"],
+      ["nerRevision", "HF_REVISION"],
+      ["nerWeightsRevision", "HF_WEIGHTS_REVISION"],
+    ]) {
+      const value = this.node.tryGetContext(key);
+      if (value) nerBuildArgs[arg] = String(value);
+    }
     const gatewayDir = path.join(__dirname, "../../services/gateway");
     const gatewayProps = {
       timeout: cdk.Duration.seconds(30),
@@ -105,6 +118,7 @@ export class MedGuardStack extends cdk.Stack {
           ...gatewayProps,
           code: lambda.DockerImageCode.fromImageAsset(gatewayDir, {
             platform: ecrAssets.Platform.LINUX_AMD64,
+            buildArgs: nerBuildArgs,
           }),
           memorySize: nerMemoryMb,
         })
