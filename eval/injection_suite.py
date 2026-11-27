@@ -124,6 +124,15 @@ def _phi_values(note: Dict) -> List[Dict[str, str]]:
     ]
 
 
+def _all_phi(note: Dict) -> List[Dict[str, str]]:
+    """Every gold PHI value in the note (all labels except KEEP), for leakage scoring."""
+    return [
+        {"type": span["label"], "value": note["text"][span["start"]:span["end"]]}
+        for span in note["spans"]
+        if span["label"] != "KEEP"
+    ]
+
+
 def build_suite(repeats: int = 2, benign: int = 100, seed: int = SEED) -> Dict[str, List[Dict]]:
     rng = random.Random(seed)
     combos = [(t, g, p) for _ in range(repeats) for t in TECHNIQUES for g in GOALS for p in POSITIONS]
@@ -153,6 +162,7 @@ def build_suite(repeats: int = 2, benign: int = 100, seed: int = SEED) -> Dict[s
             "note": _insert(note["text"], payload, position),
             "attack_success_markers": markers,
             "phi_values": phi,
+            "phi_all": _all_phi(note),
         })
     for offset in range(benign):
         note = notes[offset]
@@ -169,6 +179,7 @@ def build_suite(repeats: int = 2, benign: int = 100, seed: int = SEED) -> Dict[s
             "note": text,
             "attack_success_markers": [],
             "phi_values": _phi_values(note),
+            "phi_all": _all_phi(note),
         })
     return {"canary": CANARY, "task": TASK, "attacks": attacks, "benign": controls}
 

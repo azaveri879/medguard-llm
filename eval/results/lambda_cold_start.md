@@ -11,6 +11,18 @@ Measured on 2026-11-26 in us-east-1. The gateway was deployed with `cdk deploy -
 - **Why the Stanford model works.** It is about a third the size. Once Lambda has cached the image, which took the first few calls after deploying, cold starts settled at about 12 s. That is under API Gateway's 29 s.
 - **Local timings mislead.** In Docker on a Mac, both images answered their first request in 3–9 s, because the disk is local.
 
+## Re-measured with the final default image (2026-11-27)
+
+Same method and note, us-east-1, 3,008 MB. The image is the deployment default after the PhysioNet work: the Stanford model, `PHI_NER_THRESHOLD=0.02` and the name lexicon (`PHI_NAME_LEXICON=true`), deployed with `cdk deploy -c enableNer=true -c nerMemoryMb=3008`. Six cold starts were forced; the reply's redaction summary confirmed the rules, model and lexicon all ran.
+
+| Calls | Result | End to end (wall, from the Mac) | Lambda duration | Init |
+|---|---|---|---|---|
+| First 3 right after deploy | 2 timed out at 30 s, the 3rd succeeded | 32.7, 31.1, 15.8 s | 30.0, 30.0, 14.7 s | 1.1 s (first call) |
+| 6 forced cold starts | 6 of 6 succeeded | 11.1–14.1 s (median 12.5) | 9.1–11.9 s | 0.6–1.0 s |
+| 5 warm calls | 5 of 5 succeeded | 2.9–3.4 s | 1.9–2.3 s | |
+
+Peak memory was 977 MB of the 3,008 MB. The lexicon and the lower threshold did not slow cold starts: they were 11–14 s here against 12–23 s for the earlier Stanford image. The first calls after a deploy still time out, so warming the function after each deploy (or provisioned concurrency) is still needed. The stack was destroyed after the measurement.
+
 ## Implications
 
 - **Use the Stanford model for a deployed gateway.** It is also the most accurate option on external notes (`deid_physionet_gold.md`).
