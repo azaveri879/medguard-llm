@@ -95,7 +95,7 @@ Latency per call (in-process, includes Bedrock): median 1.5 s direct, 1.8 s for 
 
 ## Limits
 
-- **Synthetic notes for the injection cells.** Their PHI is in formats the redactor handles well, so R's near-zero leakage there is optimistic. PhysioNet shows R alone misses about 19% of real PHI (13% with EHR names).
+- **Synthetic notes for the injection cells.** Their PHI is in formats the redactor handles well, so R's near-zero leakage there is optimistic. PhysioNet shows R alone misses about 19% of real PHI (12% with EHR names).
 - **One model, one run per case** (Claude Haiku 4.5, temperature 0.2). Rare events such as v1's canary leaks can appear or vanish between runs.
 - **Template attacks** with success checked by codes and URLs, which redaction can destroy. Adaptive attacks are not tested yet.
 - **The PHI leakage check is string matching.** A model that paraphrases a value ("born in the spring of 1950") is not counted.
