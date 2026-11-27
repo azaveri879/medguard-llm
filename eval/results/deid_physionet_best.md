@@ -54,6 +54,24 @@ On the MIMIC tests run in Colab, the same three models score as follows:
 
 Unlike the earlier retraining on the default generator (73.2% with unseen formats, `deid_unseen_formats.md`), this one did not collapse. The rich generator does produce some formats close to the unseen ones, though, so PhysioNet remains the clean test.
 
+## Where the gain comes from: rich surrogates vs PhysioNet notes
+
+A second run trained the Stanford model on the rich surrogates only: the same 5,000 MIMIC notes per seed, without the PhysioNet tune half. Its models are stored as `stanford_richonly_seed*`. A rich-only model has never seen any note from the PhysioNet corpus, so for it the test half is fully independent.
+
+Mean of 3 seeds, test half, setup B settings:
+
+| Model | PHI found (range) | Names | With EHR names (range) | Names | Other words removed |
+|---|---|---|---|---|---|
+| Public Stanford model (setup A) | 80.9% | 72.8% | 87.6% | 85.5% | 1.7% |
+| Retrained, rich surrogates only | 83.7% (83.0–84.0) | 75.2% | **90.0% (89.6–90.2)** | 87.3% | 1.5–1.7% |
+| Retrained, rich surrogates + PhysioNet tune half | 85.1% (84.2–86.0) | 76.4% | 91.0% (90.1–92.0) | 87.9% | 1.5–2.0% |
+
+Paired differences on the same notes:
+- **Rich-only over setup A:** +3.1 (+1.6 to +4.6), +2.1 (+0.8 to +3.5) and +3.1 (+1.9 to +4.3); with EHR names +2.5, +2.0 and +2.6, all significant.
+- **Adding the PhysioNet tune half, seed by seed:** +0.2 (−0.6 to +1.1), +2.0 (+1.0 to +3.1) and +2.0 (+1.0 to +3.1); with EHR names +0.0, +1.5 and +1.8.
+
+So **most of the gain comes from the rich surrogate generator** (about +2.8 points over the public model). The PhysioNet notes add about +1.4 more, significant in 2 of 3 seeds. The cleanest result is the rich-only model with EHR names: 90.0% on notes from a corpus it never saw, trained only on MIMIC with synthetic surrogates.
+
 ## Built into the gateway
 
 Everything above now runs in the gateway (`services/gateway/ner_redaction.py`), configured by environment variables:
@@ -83,12 +101,12 @@ The deployment defaults are now setup A. With `-c enableNer=true` the image bake
 
 - **With EHR names, the gateway meets the 90% target on independent notes**, at 1.55% over-redaction. Without them it reaches 84%.
 - **Names remain the hard part.** On the tune half, about a third of the names still missed are ordinary English words (46 of 130) and 29% are three letters or fewer. Context-free name lists or rules cannot fix these reliably.
-- **Retraining now helps** where the old generator hurt (`deid_physionet_gold.md`). The difference: the rich surrogate pools plus real author-written surrogates from the tune half. A rich-only run, without the PhysioNet notes, has not been done, so the two causes cannot yet be separated.
+- **Retraining now helps** where the old generator hurt (`deid_physionet_gold.md`). The rich surrogate pools explain most of the change, and the PhysioNet tune half adds a little more (see above).
 
 ## Limits
 
 - **Three seeds,** but one corpus. The spread across seeds is about 1 point.
-- **Same source.** The tune half used in training comes from the same corpus, hospital and note type as the test half, though from different patients. This is an in-corpus held-out test, not a different hospital. n2c2 2014 remains the outside test once its portal reopens.
+- **Same source, for the PhysioNet-trained models.** Their tune half comes from the same corpus, hospital and note type as the test half, though from different patients. The rich-only models never saw the corpus at all and still reach 90.0% with EHR names. A different-hospital test is pending: SHIELD (Stanford, requested 2026-11-26) and n2c2 2014, once its portal reopens.
 - **Simulated EHR names.** They are taken from gold tag roles. A real EHR supplies names in its own forms, and nicknames or misspellings in notes would be missed.
 - **The lexicon's names come from Faker**, the same source as the MIMIC test's fake names. So the lexicon is credited only on PhysioNet, not on the MIMIC test.
 - **Recall only.** "Other words removed" is the only over-redaction measure, and the corpus marks no clinical-term spans.
