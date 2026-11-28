@@ -32,6 +32,42 @@ class WindowLabelTests(unittest.TestCase):
         self.assertEqual(window_labels(offsets, spans, LABELS), [IGNORE_INDEX, LABELS["O"]])
 
 
+STANFORD = {name: index for index, name in enumerate(
+    ["O", "VENDOR", "DATE", "HCW", "HOSPITAL", "ID", "PATIENT", "PHONE", "AGE"]
+)}
+
+
+class PlainLabelTests(unittest.TestCase):
+    def test_plain_labels_map_onto_stanford_types(self):
+        offsets = [(0, 3), (3, 6), (7, 11), (12, 18), (19, 22), (23, 25)]
+        spans = [
+            {"start": 0, "end": 6, "label": "NAME", "role": "patient"},
+            {"start": 7, "end": 11, "label": "NAME", "role": "care_team"},
+            {"start": 12, "end": 18, "label": "LOCATION"},
+            {"start": 19, "end": 22, "label": "EMAIL"},
+            {"start": 23, "end": 25, "label": "AGE_OVER_89"},
+        ]
+        expected = [STANFORD[t] for t in ("PATIENT", "PATIENT", "HCW", "HOSPITAL", "ID", "AGE")]
+        self.assertEqual(window_labels(offsets, spans, STANFORD), expected)
+
+    def test_age_label_is_added_to_a_plain_label_head(self):
+        import torch
+        from types import SimpleNamespace
+
+        from train_deid import ensure_age_label
+
+        labels = ["O", "DATE", "PATIENT"]
+        config = SimpleNamespace(id2label=dict(enumerate(labels)), label2id={l: i for i, l in enumerate(labels)}, num_labels=3)
+        model = SimpleNamespace(config=config, classifier=torch.nn.Linear(4, 3), num_labels=3)
+        before = model.classifier.weight.detach().clone()
+        ensure_age_label(model, torch)
+        self.assertEqual(model.classifier.out_features, 4)
+        self.assertEqual((config.label2id["AGE"], config.id2label[3], config.num_labels, model.num_labels), (3, "AGE", 4, 4))
+        self.assertTrue(torch.equal(model.classifier.weight[:3], before))
+        ensure_age_label(model, torch)  # a second call changes nothing
+        self.assertEqual(model.classifier.out_features, 4)
+
+
 class PatientSplitTests(unittest.TestCase):
     def test_split_is_stable_and_near_expected_proportions(self):
         splits = [patient_split(str(subject)) for subject in range(20000)]

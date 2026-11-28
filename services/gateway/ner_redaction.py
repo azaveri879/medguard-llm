@@ -13,9 +13,17 @@ from phi_redaction import phi_redact
 
 PLACEHOLDER = re.compile(r"\[(?:PHI_[A-Z]+|REDACTED)\]")
 DOSE = re.compile(r"\b\d+(?:\.\d+)?(?:/\d+(?:\.\d+)?)*\s*(?:mg|mcg|g|mL|ml|units?)\b")
+# Clinical words the model must not redact. Device names that are not surnames are
+# kept anywhere; eponyms only before a clinical noun, since Parkinson or Murphy can
+# also be a patient's name.
+CLINICAL_TERMS = re.compile(
+    r"(?i)\b(?:foley|picc|dobhoff|swan[- ]ganz|port-a-cath)\b"
+    r"|\b[A-Za-z]+(?:-[A-Za-z]+)?(?:'s)?\s+(?:disease|syndrome|palsy|catheter|sign|lymphoma|esophagus"
+    r"|thyroiditis|dementia|reflex|respirations|maneuver|procedure)\b"
+)
 
-# Model labels mapped to redaction types. AGE and O are not redacted: ages under
-# 90 are not PHI under Safe Harbor and are clinically useful.
+# Model labels mapped to redaction types. O is not redacted, and AGE is not by
+# default: ages under 90 are not PHI under Safe Harbor and are clinically useful.
 LABEL_TYPES = {
     "PATIENT": "NAME",
     "STAFF": "NAME",
@@ -27,19 +35,41 @@ LABEL_TYPES = {
     "HOSP": "LOCATION",
     "PATORG": "LOCATION",
     "OTHERPHI": "OTHER",
+    # StanfordAIMI/stanford-deidentifier-base labels.
+    "HCW": "NAME",
+    "HOSPITAL": "LOCATION",
+    "VENDOR": "OTHER",
 }
 
 MIN_SCORE = 0.01
 
-_loaded = None
+# Models fine-tuned by eval/train_deid.py use AGE only for ages over 89 and record
+# that in their config, so their AGE label can be redacted.
+AGE_OVER_89_FLAG = "medguard_age_over_89"
+
+_loaded = {}
+_lexicon = None
+NAME_TOKEN = re.compile(r"[A-Za-z]{3,}")
 
 
-def _load_model():
-    global _loaded
-    if _loaded is None:
+def _label_types(config):
+    """Map each model label index to a redaction type, or None to keep the token."""
+    types = dict(LABEL_TYPES)
+    if getattr(config, AGE_OVER_89_FLAG, False) or os.environ.get("PHI_NER_AGE_OVER_89") == "true":
+        types["AGE"] = "AGE"
+    return [types.get(config.id2label[index].split("-")[-1]) for index in range(len(config.id2label))]
+
+
+def _extra_models():
+    """Models whose own top-label detections are added to the primary model's (a union)."""
+    return [path.strip() for path in os.environ.get("PHI_NER_EXTRA_MODELS", "").split(",") if path.strip()]
+
+
+def _load_model(path: str = None):
+    path = path or os.environ.get("PHI_NER_MODEL", "obi/deid_roberta_i2b2")
+    if path not in _loaded:
         from transformers import AutoModelForTokenClassification, AutoTokenizer
 
-        path = os.environ.get("PHI_NER_MODEL", "obi/deid_roberta_i2b2")
         tokenizer = AutoTokenizer.from_pretrained(path)
         model = AutoModelForTokenClassification.from_pretrained(path, use_safetensors=True)
         import torch
@@ -47,13 +77,13 @@ def _load_model():
         if torch.cuda.is_available():
             model.to("cuda")
         model.eval()
-        _loaded = (tokenizer, model)
-    return _loaded
+        _loaded[path] = (tokenizer, model)
+    return _loaded[path]
 
 
-def _token_scores(text: str):
+def _token_scores(text: str, path: str = None):
     """Return (start, end, PHI type, PHI probability, is top label) for candidate tokens."""
-    tokenizer, model = _load_model()
+    tokenizer, model = _load_model(path)
 
     import torch
 
@@ -67,10 +97,7 @@ def _token_scores(text: str):
     with torch.no_grad():
         probabilities = model(**encoded).logits.softmax(dim=-1).cpu()
 
-    label_types = [
-        LABEL_TYPES.get(model.config.id2label[index].split("-")[-1])
-        for index in range(probabilities.shape[-1])
-    ]
+    label_types = _label_types(model.config)
     phi_mask = torch.tensor([phi_type is not None for phi_type in label_types])
     phi_scores = probabilities[..., phi_mask].sum(dim=-1).tolist()
     phi_probabilities = probabilities.masked_fill(~phi_mask, 0)
@@ -91,13 +118,43 @@ def _token_entities(text: str):
 
     By default a token is PHI when a PHI label is the model's top choice. Setting
     PHI_NER_THRESHOLD marks it PHI when total PHI probability reaches that value.
+    Models in PHI_NER_EXTRA_MODELS add their own top-label detections.
     """
-    threshold = os.environ.get("PHI_NER_THRESHOLD")
+    threshold = os.environ.get("PHI_NER_THRESHOLD") or None  # empty means top label
     entities = []
     for start, end, phi_type, score, is_top in _token_scores(text):
         if is_top if threshold is None else score >= float(threshold):
             entities.append((start, end, phi_type))
+    for path in _extra_models():
+        entities += [(start, end, phi_type) for start, end, phi_type, _, is_top in _token_scores(text, path) if is_top]
     return entities
+
+
+def _load_lexicon():
+    global _lexicon
+    if _lexicon is None:
+        path = os.environ.get("PHI_NAME_LEXICON_FILE") or os.path.join(os.path.dirname(__file__), "name_lexicon.txt")
+        with open(path, encoding="utf-8") as handle:
+            _lexicon = {line.strip() for line in handle if line.strip()}
+    return _lexicon
+
+
+def redact_lexicon_names(text: str):
+    """Redact words on the name lexicon (names that are not ordinary words).
+
+    Off unless PHI_NAME_LEXICON=true. Many names in clinical notes are bare surnames
+    with no title or capital letter for a model to go on; the lexicon catches the ones
+    that cannot be mistaken for ordinary English (eval/build_name_lexicon.py).
+    """
+    if os.environ.get("PHI_NAME_LEXICON") != "true" or not text:
+        return text or "", 0
+    lexicon = _load_lexicon()
+    protected = [m.span() for m in PLACEHOLDER.finditer(text)]
+    hits = [m.span() for m in NAME_TOKEN.finditer(text)
+            if m.group().lower() in lexicon and not _overlaps(*m.span(), protected)]
+    for start, end in reversed(hits):
+        text = f"{text[:start]}[PHI_NAME]{text[end:]}"
+    return text, len(hits)
 
 
 def _overlaps(start: int, end: int, protected) -> bool:
@@ -109,7 +166,7 @@ def redact_entities(text: str):
     if not text:
         return text or "", {}
 
-    protected = [m.span() for pattern in (PLACEHOLDER, DOSE) for m in pattern.finditer(text)]
+    protected = [m.span() for pattern in (PLACEHOLDER, DOSE, CLINICAL_TERMS) for m in pattern.finditer(text)]
     merged = []
     for start, end, phi_type in sorted(set(_token_entities(text))):
         if _overlaps(start, end, protected):
@@ -140,4 +197,7 @@ def phi_redact_with_ner(text: str):
     redacted, entity_counts = redact_entities(redacted)
     for phi_type, count in entity_counts.items():
         counts[phi_type] = counts.get(phi_type, 0) + count
+    redacted, lexicon_names = redact_lexicon_names(redacted)
+    if lexicon_names:
+        counts["NAME"] = counts.get("NAME", 0) + lexicon_names
     return redacted, counts

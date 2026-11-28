@@ -82,6 +82,22 @@ export class MedGuardStack extends cdk.Stack {
     });
 
     const enableNer = this.node.tryGetContext("enableNer") === "true";
+    // 6144 MB gives the NER image about 3.5 vCPUs. New accounts may be capped at
+    // 3008 MB until Lambda's memory quota is raised; pass -c nerMemoryMb=3008 there.
+    const nerMemoryMb = Number(this.node.tryGetContext("nerMemoryMb") ?? 6144);
+    // Hub model baked into the NER image (see services/gateway/Dockerfile). The default
+    // is StanfordAIMI/stanford-deidentifier-base; for the original model:
+    // -c nerModel=obi/deid_roberta_i2b2 -c nerRevision=78f2152eb93ddd817290ce8dbe46f1a6685e09fc
+    // -c nerWeightsRevision=""
+    const nerBuildArgs: Record<string, string> = {};
+    for (const [key, arg] of [
+      ["nerModel", "HF_MODEL"],
+      ["nerRevision", "HF_REVISION"],
+      ["nerWeightsRevision", "HF_WEIGHTS_REVISION"],
+    ]) {
+      const value = this.node.tryGetContext(key);
+      if (value !== undefined && value !== null) nerBuildArgs[arg] = String(value);
+    }
     const gatewayDir = path.join(__dirname, "../../services/gateway");
     const gatewayProps = {
       timeout: cdk.Duration.seconds(30),
@@ -93,6 +109,14 @@ export class MedGuardStack extends cdk.Stack {
         DDB_TABLE: auditTable.tableName,
         BEDROCK_MODEL_ID: bedrockModelId,
         PHI_NER_ENABLED: enableNer ? "true" : "false",
+        // Best single-model setting on PhysioNet's held-out notes (eval/results/deid_physionet_best.md).
+        // Override with -c nerThreshold=... (empty for top label) and -c nameLexicon=false.
+        ...(enableNer
+          ? {
+              PHI_NER_THRESHOLD: String(this.node.tryGetContext("nerThreshold") ?? "0.02"),
+              PHI_NAME_LEXICON: String(this.node.tryGetContext("nameLexicon") ?? "true"),
+            }
+          : {}),
       },
       logGroup,
     };
@@ -102,8 +126,9 @@ export class MedGuardStack extends cdk.Stack {
           ...gatewayProps,
           code: lambda.DockerImageCode.fromImageAsset(gatewayDir, {
             platform: ecrAssets.Platform.LINUX_AMD64,
+            buildArgs: nerBuildArgs,
           }),
-          memorySize: 6144,
+          memorySize: nerMemoryMb,
         })
       : new lambda.Function(this, "GatewayFn", {
           ...gatewayProps,

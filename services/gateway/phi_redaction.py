@@ -35,6 +35,25 @@ MONTH = (
 )
 DOSE_UNIT = r"(?:mg|mcg|g|ml|mL|units?)"
 
+# Bare month/day dates such as 3/12 or 3-12, common in nursing notes. Clinical
+# notes are full of look-alikes (q 2-4 hrs, RR 18-22, CPAP 5/5, D5 1/2 NS), so
+# known measurement words before and units after rule a match out. Chosen on the
+# tune half of PhysioNet's gold notes: 80% of dates there, 41 false matches in
+# about 180,000 words.
+_MD, _DD = r"(?:1[0-2]|0?[1-9])", r"(?:3[01]|[12]\d|0?[1-9])"
+_NOT_MEASUREMENT = "".join(
+    rf"(?<!\b{word} )"
+    for word in ("q", "rr", "hr", "bp", "cvp", "pad", "pap", "map", "ps", "psv", "peep", "fio2", "x",
+                 "sbp", "dbp", "gcs", "k", "cpap", "pcwp", "imv", "stage", "rales", "crackles",
+                 "flowby", "breathing", "d5", "d10")
+) + r"(?<!\bq)"
+_NOT_UNIT = (
+    r"(?!\s*(?:hrs?\b|hours?\b|h\b|min|breaths|bpm|mmhg|cm|mm\b|cc\b|ml\b|l\b|liters?|litres?|mg|mcg|units?"
+    r"|meq|%|x\b|times|days?\b|weeks?|months?|years?|yrs?|wks?|range|lpm|beats?|cmh2o|ns\b|fio2|puffs|assist"
+    r"|strength|tabs?\b|tablets?|caps?\b|capsules?|pills?|doses?|up\b|way\b|/|\.\d|\d))"
+)
+MONTH_DAY = rf"(?i:{_NOT_MEASUREMENT}(?<![\w/.-]){_MD}[/-]{_DD}(?![\w/-]){_NOT_UNIT})"
+
 # Applied in this order. Each entry is (pattern, PHI type).
 STRUCTURED_RULES = [
     (r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", "EMAIL"),
@@ -44,6 +63,7 @@ STRUCTURED_RULES = [
     (r"\b\d{4}-\d{2}-\d{2}\b", "DATE"),
     (rf"\b\d{{1,2}}[/\-]\d{{1,2}}[/\-]\d{{2,4}}\b(?!\s*{DOSE_UNIT}\b)", "DATE"),
     (rf"\b{MONTH}[ \t]+\d{{1,2}}(?:st|nd|rd|th)?,?[ \t]+\d{{4}}\b", "DATE"),
+    (MONTH_DAY, "DATE"),
     (r"\b\d{3}[-.\s]?\d{2}[-.\s]?\d{4}\b", "SSN"),
     (ADDRESS, "ADDRESS"),
     (r"\b(?:9\d|1[0-4]\d)(?=[-\s]?(?:years?|yrs?|y/?o)\b)", "AGE"),

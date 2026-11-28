@@ -42,6 +42,16 @@ class RedactEntitiesTests(unittest.TestCase):
         out, counts = self.run_with(text, token_spans(text, "5/10", phi_type="DATE"))
         self.assertEqual((out, counts), (text, {}))
 
+    def test_clinical_devices_and_eponyms_are_protected(self):
+        text = "Foley in place; known Parkinson disease and Bell's palsy."
+        entities = token_spans(text, "Foley", "Parkinson", "Bell")
+        self.assertEqual(self.run_with(text, entities), (text, {}))
+
+    def test_surname_alone_is_still_redacted(self):
+        text = "Spoke with Murphy about Parkinson."
+        out, counts = self.run_with(text, token_spans(text, "Murphy", "Parkinson"))
+        self.assertEqual((out, counts), ("Spoke with [PHI_NAME] about [PHI_NAME].", {"NAME": 2}))
+
     def test_existing_placeholder_is_left_alone(self):
         text = "Seen by [PHI_NAME] today."
         out, counts = self.run_with(text, token_spans(text, "PHI_NAME"))
@@ -78,6 +88,72 @@ class ThresholdTests(unittest.TestCase):
         self.assertEqual(len(self.entities(0.5)), 1)
         self.assertEqual(len(self.entities(0.2)), 2)
         self.assertEqual(len(self.entities(0.05)), 3)
+
+
+class ExtraModelTests(unittest.TestCase):
+    def test_extra_models_add_their_top_label_detections(self):
+        primary = [(0, 4, "NAME", 0.9, True)]
+        extra = [(5, 9, "LOCATION", 0.8, True), (10, 14, "DATE", 0.4, False)]
+
+        def scores(text, path=None):
+            return extra if path == "second-model" else primary
+
+        env = {"PHI_NER_EXTRA_MODELS": " second-model , "}
+        with mock.patch.object(ner_redaction, "_token_scores", side_effect=scores), \
+                mock.patch.dict(ner_redaction.os.environ, env):
+            ner_redaction.os.environ.pop("PHI_NER_THRESHOLD", None)
+            entities = ner_redaction._token_entities("text")
+        self.assertEqual(entities, [(0, 4, "NAME"), (5, 9, "LOCATION")])
+
+    def test_no_extra_models_by_default(self):
+        with mock.patch.dict(ner_redaction.os.environ, {"PHI_NER_EXTRA_MODELS": ""}):
+            self.assertEqual(ner_redaction._extra_models(), [])
+
+
+class LexiconTests(unittest.TestCase):
+    def redact(self, text, enabled=True):
+        env = {"PHI_NAME_LEXICON": "true" if enabled else ""}
+        with mock.patch.object(ner_redaction, "_lexicon", {"okonkwo", "przybylski"}), \
+                mock.patch.dict(ner_redaction.os.environ, env):
+            return ner_redaction.redact_lexicon_names(text)
+
+    def test_lexicon_names_are_redacted_in_any_case(self):
+        self.assertEqual(self.redact("spoke with OKONKWO and przybylski re plan"),
+                         ("spoke with [PHI_NAME] and [PHI_NAME] re plan", 2))
+
+    def test_lexicon_is_off_by_default_and_skips_placeholders(self):
+        self.assertEqual(self.redact("okonkwo", enabled=False), ("okonkwo", 0))
+        self.assertEqual(self.redact("[PHI_NAME] seen"), ("[PHI_NAME] seen", 0))
+
+    def test_shipped_lexicon_excludes_ordinary_words_and_eponyms(self):
+        path = ner_redaction.os.path.join(ner_redaction.os.path.dirname(ner_redaction.__file__), "name_lexicon.txt")
+        names = set(open(path).read().split())
+        self.assertGreater(len(names), 5000)
+        self.assertFalse({"brown", "may", "will", "foley", "smith", "rose"} & names)
+
+
+class AgeLabelTests(unittest.TestCase):
+    def config(self, **extra):
+        labels = {0: "O", 1: "U-AGE", 2: "U-PATIENT"}
+        return mock.Mock(spec=["id2label", *extra], id2label=labels, **extra)
+
+    def test_age_is_kept_for_the_original_model(self):
+        with mock.patch.dict(ner_redaction.os.environ, {"PHI_NER_AGE_OVER_89": ""}):
+            self.assertEqual(ner_redaction._label_types(self.config()), [None, None, "NAME"])
+
+    def test_age_is_redacted_when_the_model_says_it_means_over_89(self):
+        config = self.config(medguard_age_over_89=True)
+        self.assertEqual(ner_redaction._label_types(config), [None, "AGE", "NAME"])
+
+    def test_environment_can_enable_age(self):
+        with mock.patch.dict(ner_redaction.os.environ, {"PHI_NER_AGE_OVER_89": "true"}):
+            self.assertEqual(ner_redaction._label_types(self.config()), [None, "AGE", "NAME"])
+
+    def test_stanford_labels_are_redacted(self):
+        labels = {0: "O", 1: "VENDOR", 2: "DATE", 3: "HCW", 4: "HOSPITAL", 5: "ID", 6: "PATIENT", 7: "PHONE"}
+        config = mock.Mock(spec=["id2label"], id2label=labels)
+        self.assertEqual(ner_redaction._label_types(config),
+                         [None, "OTHER", "DATE", "NAME", "LOCATION", "ID", "NAME", "PHONE"])
 
 
 class PipelineTests(unittest.TestCase):

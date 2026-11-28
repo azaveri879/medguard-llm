@@ -2,57 +2,34 @@
 
 MedGuard is a defense-in-depth security gateway designed to enable safe deployment of Large Language Models (LLMs) within hospital environments. It provides PHI protection, prompt injection defense, policy enforcement, and comprehensive audit logging.
 
-## Status & Test Results
+## Status
 
-### Research Prototype - Unit Tests Passing
+> **Research prototype, not production ready.** The results below come from small or synthetic test sets. They show how the system behaves; they do not show it is safe for real patient data.
 
-> **Status:** Research prototype, not production ready. Unit tests pass on a small hand-written suite, and in a small evaluation on Claude Haiku 4.5, MedGuard summarized clinical notes without repeating known identifiers, while direct Bedrock repeated them every time. The suite is too small to support broader claims. See [Roadmap](#roadmap-revisited-november-2026).
+### What has been measured
 
-**Last Verified:** January 3, 2026  
-**Unit Test Status:** 15/15 tests passing on a small controlled suite
+| Result | Measured | Source |
+|---|---|---|
+| Identifiers repeated by Claude Haiku 4.5 on clinical notes | Direct Bedrock: 9 of 9 runs. Through MedGuard: 0 of 9 (3 notes × 3 runs). | `eval/results/baseline_comparison.md` |
+| Indirect injection hidden in clinical notes (300 attacks, synthetic notes, Claude Haiku 4.5) | Attack success 10.3% direct vs 0.7% through MedGuard; 2.5% vs 0.8% excluding PHI theft. Direct summaries repeat an ID or phone number in 65 of 100 benign notes, MedGuard in 0. The regex injection score flags only 20% of attacks. | `eval/results/injection_clinical_notes.md` |
+| PHI found on real MIMIC-III notes, default model | Rules + `obi/deid_roberta_i2b2`: 90.3% of PHI, 71.3% of names (1,000 held-out notes) | `eval/results/deid_colab_3seed.md` |
+| Same notes, model retrained on our MIMIC surrogates (3 seeds) | 99.2% of PHI, 97.8% of names, but this does not generalize: 73.2% with unseen surrogate formats (vs 85.0% for the default model) | `eval/results/deid_colab_3seed.md`, `eval/results/deid_unseen_formats.md` |
+| PHI found on PhysioNet's expert-annotated gold notes (independent surrogates), default gateway | 64.8% of PHI; the MIMIC-retrained models do worse (56.0%) | `eval/results/deid_physionet_gold.md` |
+| Same corpus, held-out test half, best setting (3 seeds) | Stanford model retrained on rich surrogates + the tune half, date rule, threshold, model union and name lexicon: 85.1% of PHI (mean of 3 seeds); **91.0% with EHR-supplied patient and care-team names** (range 90.1–92.0%), 1.5–2.0% of other words removed. Trained on MIMIC with rich surrogates only (never seeing this corpus): 83.7% / 90.0%. The Lambda-deployable single public model: 80.9% / 87.6% | `eval/results/deid_physionet_best.md` |
+| Cold start on AWS Lambda (3,008 MB) | Stanford model: 12–23 s, warm 2.6–3.3 s; RoBERTa-large model: times out | `eval/results/lambda_cold_start.md` |
 
-#### PHI Redaction Tests: ✅ 3/3 PASSED
+The PHI benchmarks score recall: synthetic or author-written surrogates replace real identifiers, and a span counts only if fully redacted. **No result here shows zero PHI leakage.** Even the best setting misses about 1 in 10 PHI spans on independent notes. Retraining on one surrogate generator inflated in-distribution results, so external tests are the ones to trust. Retrained weights derive from MIMIC and are not published. See [Roadmap](#roadmap-revisited-november-2026) for limits and next steps.
 
-| Test Case | Detection Rate | Status |
-|-----------|---------------|--------|
-| Emergency Department Note | 100.0% (9/9) | ✅ PASS |
-| Discharge Summary | 88.9% (8/9) | ✅ PASS |
-| Progress Note | 100.0% (8/8) | ✅ PASS |
+### Unit tests
 
-**Average Detection Rate:** 96.3% on evaluated clinical note types  
-**PHI Types Detected:** Email, Phone, Date, SSN, MRN, Name, Address  
-**Security:** ✅ Zero PHI leakage detected in model outputs across all test cases
+The original hand-written suite (`tests/`, 3 PHI notes and 12 injection prompts) passes 15 of 15. Detection on those 3 notes averages 96.3%. That suite is too small to support rates beyond itself, and the 100% injection result there should not be read as a block rate against real attacks. The evaluation code has its own offline tests in `eval/` (see `eval/README.md`).
 
-#### Injection Attack Tests: ✅ 12/12 PASSED
-
-| Severity | Tests | Pass Rate |
-|----------|-------|-----------|
-| **CRITICAL** | 2/2 | 100% ✅ |
-| **HIGH** | 4/4 | 100% ✅ |
-| **MEDIUM** | 5/5 | 100% ✅ |
-| **LOW** | 1/1 | 100% ✅ |
-
-**Attack Block Rate:** 100% on the evaluated attack suite (12 injection scenarios)  
-**Average Injection Score:** 1.67  
-**Attack Types Tested:** Direct override, indirect injection, jailbreak, exfiltration, role confusion, multi-layer, hidden instructions, social engineering, Base64, Unicode, context switching, prompt leakage
-
-#### Performance Metrics
-
-- **PHI Detection Rate:** 96.3% (exceeds 80% target)
-- **Injection Detection:** 100% of evaluated attacks detected
-- **Attack Block Rate:** 100% on the evaluated attack suite (12 scenarios)
-- **PHI Leakage Rate:** 0% (zero leaks in testing)
-- **Test Pass Rate:** 100% (15/15 tests passing)
-
-### Evaluation Scope
-
-All reported metrics reflect controlled test suites designed to validate system behavior under known threat scenarios. These results should not be interpreted as guarantees against all possible attacks, but as evidence that defense-in-depth controls significantly reduce risk compared to baseline LLM deployments.
 
 ## Architecture Overview
 
 MedGuard operates as a model-agnostic middleware positioned between clinical data sources and the LLM inference layer. The system implements multiple security controls:
 
-1. **PHI Detection & Transformation**: Hybrid detection engine combining rule-based patterns and ML-based NER (currently regex-based, upgradeable to Presidio/medspaCy). The current implementation prioritizes deterministic, interpretable PHI detection for system validation; higher-recall ML-based detectors (Presidio, transformer NER) are planned and evaluated separately.
+1. **PHI Detection & Transformation**: Rule-based patterns, plus an optional transformer NER pass (`obi/deid_roberta_i2b2` or a retrained model, enabled with `cdk deploy -c enableNer=true`) and optional names supplied by the EHR (`known_names`).
 2. **Prompt Injection Mitigation**: Instruction-data separation with hierarchical precedence enforcement
 3. **Policy Enforcement**: Role-based access control (RBAC) governing data access and output detail levels
 4. **Output Guard**: Post-generation scanning for PHI leakage and verbatim document extraction
@@ -253,9 +230,7 @@ python3 test_injection_attacks.py
 
 ### Expected Results
 
-- **PHI Detection:** >96% detection rate, zero PHI in output
-- **Injection Detection:** All attacks detected and blocked
-- **Test Pass Rate:** 100% (15/15 tests)
+All 15 tests should pass. These tests check behavior on a small fixed suite; they do not measure detection rates on real notes (see [Status](#status)).
 
 ## Compliance & Audit
 
@@ -348,6 +323,14 @@ aws cognito-idp initiate-auth \
 - `AUDIT_PREFIX`: S3 key prefix (default: `events/`)
 - `DDB_TABLE`: DynamoDB table name
 - `BEDROCK_MODEL_ID`: Bedrock model identifier
+- `PHI_NER_ENABLED`: `true` to run the model pass after the rules (set by `-c enableNer=true`)
+- `PHI_NER_MODEL`: model directory baked into the image (default image: `StanfordAIMI/stanford-deidentifier-base`; CDK context `nerModel`, `nerRevision`, `nerWeightsRevision`)
+- `PHI_NER_THRESHOLD`: total PHI probability at which a token is redacted; empty means the model's top label (default with NER: `0.02`, context `nerThreshold`)
+- `PHI_NER_EXTRA_MODELS`: comma-separated models whose detections are added (off by default; too heavy for Lambda)
+- `PHI_NAME_LEXICON`: `true` to redact names on `services/gateway/name_lexicon.txt` (default with NER: `true`, context `nameLexicon`)
+- `nerMemoryMb` (CDK context): Lambda memory for the NER image (default 6144; new accounts may be capped at 3008)
+
+These defaults are the best single-model setting on PhysioNet's held-out gold notes. See `eval/results/deid_physionet_best.md`.
 
 ## Important Notes
 
@@ -394,15 +377,15 @@ cdk diff           # Compare with deployed stack
 
 ## Readiness Checklist
 
-- [x] ✅ PHI detection and redaction (96.3% detection rate)
-- [x] ✅ Injection detection and blocking (100% on evaluated suite)
-- [x] ✅ Audit logging operational (S3 + DynamoDB)
-- [x] ✅ All tests passing (15/15)
-- [x] ✅ Error handling implemented
-- [x] ✅ VPC endpoints configured
-- [x] ✅ Bedrock access working
+- [x] PHI detection and redaction implemented (rules + optional NER; recall on real notes in [Status](#status))
+- [x] Injection scoring implemented (attack success not yet measured)
+- [x] Audit logging operational (S3 + DynamoDB)
+- [x] Unit tests passing (15/15 on the small hand-written suite)
+- [x] Error handling implemented
+- [x] VPC endpoints configured
+- [x] Bedrock access working
 - [ ] ⏳ Authentication enabled (ready, currently disabled for testing)
-- [ ] ⏳ Presidio/medspaCy integration (upgrade path ready)
+- [x] Transformer NER pass (`obi/deid_roberta_i2b2`; retrained pilot not yet deployed)
 - [ ] ⏳ RAG implementation (future enhancement)
 
 ## Roadmap (Revisited November 2026)
@@ -412,6 +395,7 @@ cdk diff           # Compare with deployed stack
 - **AWS infrastructure torn down** (Nov 2026) to stop VPC interface endpoint charges. Retained resources (MIMIC-IV S3 bucket, audit buckets, DynamoDB tables, Cognito pool) may still exist. Redeploy with `cdk deploy` only when end-to-end testing is needed.
 - **PHI results on Claude Haiku 4.5.** In `eval/results/baseline_comparison.md` (3 runs of each case, gateway run locally with `eval/run_local.py`), direct Bedrock repeats identifiers in 9 of 9 clinical note runs and MedGuard in none, and MedGuard refused 0 of 15 benign requests. Clinical quality of the summaries has not been scored. Claude 3 Haiku, now end-of-life, refused all 3 notes through the gateway.
 - **PHI redaction is not yet safe for real notes.** On 400 MIMIC-III nursing and radiology notes with synthetic identifiers in place of their de-identification tags (`eval/results/deid_benchmark_mimic.md`), the default rules find about 32% of scored PHI. Adding the optional RoBERTa pass (`cdk deploy -c enableNer=true`) finds 86%, but only 61% of names. Passing patient and care-team names through the `known_names` request field raises that to 90% of PHI and 76% of names in a simulation that assumes the EHR supplies them, so many identifiers can still reach the model. Much higher scores on template-generated notes (`eval/results/deid_benchmark.md`) do not carry over to real clinical writing. The container image builds and runs offline but has not been deployed.
+- **Retraining pilot on MIMIC-III** (`eval/results/deid_colab_pilot.md`). Fine-tuning the RoBERTa model on 5,000 MIMIC-III notes with synthetic PHI raised PHI found from 90.9% to 99.3% and names from 71.8% to 98.6% on 1,000 held-out notes. This was one seed, and training and test notes come from the same source and the same surrogate generator, so part of the gain may be generator-specific. Three-seed runs with paired bootstrap intervals and an external test on the n2c2 2014 test set are next. The weights stay local and are not published.
 - **Injection results are incomplete.** MedGuard flags 15 of 15 attack runs but also 3 of 15 benign runs. Attack success is unmeasured (`nan`) because these cases have no canary or other evidence of compromise.
 - **The test suite is small** (3 PHI, 5 injection, 2 utility cases), so these rates are illustrative. Earlier versions of these tables reported hardcoded zeros for leakage and attack success; results now come from `eval/scoring.py`.
 - **MIMIC-IV notes are already de-identified** (names replaced with `___`), so measuring PHI recall on them requires injecting realistic synthetic PHI or using a labeled de-ID dataset (e.g. i2b2/n2c2 2014).
